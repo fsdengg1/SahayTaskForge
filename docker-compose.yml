@@ -1,0 +1,22 @@
+# Optional local PostgreSQL only. The application uses DATABASE_URL in server/.env (Aiven).
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sahay-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sahay
+      POSTGRES_PASSWORD: sahay_dev_local
+      POSTGRES_DB: sahay_racks
+    ports:
+      - "5433:5432"
+    volumes:
+      - sahay_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sahay -d sahay_racks"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  sahay_pg_data:
