@@ -1,9 +1,9 @@
-require('dotenv').config();
+require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 const bcrypt = require('bcryptjs');
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
-const TEMP_PASSWORD = process.env.INITIAL_USER_PASSWORD || 'Sahay@2026';
+const TEMP_PASSWORD = process.env.INITIAL_USER_PASSWORD || 'Password123!';
 
 const USERS = [
   {
@@ -131,7 +131,7 @@ async function main() {
     await prisma.userRole.createMany({
       data: roles.map((role) => ({ userId: user.id, roleId: role.id })),
     });
-    await prisma.$executeRaw`UPDATE "User" SET "mustChangePassword" = true WHERE id = ${user.id}`;
+    await prisma.$executeRaw`UPDATE "User" SET "mustChangePassword" = false WHERE id = ${user.id}`;
 
     const stored = await prisma.user.findUnique({
       where: { id: user.id },

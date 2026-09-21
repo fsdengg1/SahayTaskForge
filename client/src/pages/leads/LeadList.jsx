@@ -41,7 +41,7 @@ export default function LeadList() {
   }
 
   return (
-    <div>
+    <div className="leads-page">
       <div className="page-head">
         <div>
           <p className="eyebrow">Sales & Pre-Sales</p>
@@ -50,7 +50,7 @@ export default function LeadList() {
         </div>
         {has('leads.create') && <Link className="btn copper" to="/leads/new">+ Create Lead</Link>}
       </div>
-      <div className="filters">
+      <div className="filters leads-filters">
         <input placeholder="Search" defaultValue={q.q} onBlur={(e) => set('q', e.target.value)} />
         <select value={q.outputRequired || ''} onChange={(e) => set('outputRequired', e.target.value)}>
           <option value="">All outputs</option>
@@ -85,23 +85,22 @@ export default function LeadList() {
       </div>
       {error && <div className="notice err">{error}</div>}
       <DataTable
+        fit
         rows={data.items}
         empty="No leads found."
         columns={[
-          { key: 'leadId', label: 'Lead ID', render: (r) => <Link to={`/leads/${r.id}`}>{r.leadId}</Link> },
-          { key: 'customer', label: 'Customer', render: (r) => r.customer?.companyName },
-          { key: 'output', label: 'Output Required', render: (r) => r.outputRequiredLabel || labelOf(lookups, 'OUTPUT_REQUIRED', r.outputRequired) },
-          { key: 'sales', label: 'Sales Person', render: (r) => r.salesPerson?.fullName || '—' },
-          { key: 'priority', label: 'Priority', render: (r) => <StatusBadge code={r.priorityCode} label={labelOf(lookups, 'PRIORITY', r.priorityCode)} /> },
-          { key: 'status', label: 'Status', render: (r) => <StatusBadge code={r.statusCode} label={labelOf(lookups, 'LEAD_STATUS', r.statusCode)} /> },
-          { key: 'deadline', label: 'Submission Deadline', render: (r) => fmtDate(r.submissionDeadline) },
-          { key: 'outputStatus', label: 'Deadline Status', render: (r) => <StatusBadge code={r.outputStatus} label={r.outputStatusLabel} /> },
-          { key: 'eod', label: 'Expected Order Date', render: (r) => fmtDate(r.expectedOrderDate) },
-          { key: 'created', label: 'Created', render: (r) => fmtDate(r.createdAt) },
-          { key: 'act', label: 'Actions', render: (r) => (
-            <span className="btn-row">
-              <button className="btn ghost" type="button" onClick={() => navigate(`/leads/${r.id}`)}>View</button>
-              {has('leads.edit') && <button className="btn ghost" type="button" onClick={() => navigate(`/leads/${r.id}/edit`)}>Edit</button>}
+          { key: 'leadId', label: 'Lead ID', width: '16%', wrap: true, render: (r) => <Link to={`/leads/${r.id}`}>{r.leadId}</Link> },
+          { key: 'customer', label: 'Customer', width: '17%', wrap: true, render: (r) => r.customer?.companyName },
+          { key: 'output', label: 'Output', width: '11%', wrap: true, render: (r) => r.outputRequiredLabel || labelOf(lookups, 'OUTPUT_REQUIRED', r.outputRequired) },
+          { key: 'sales', label: 'Sales', width: '10%', wrap: true, render: (r) => r.salesPerson?.fullName || '—' },
+          { key: 'priority', label: 'Priority', width: '8%', render: (r) => <StatusBadge code={r.priorityCode} label={labelOf(lookups, 'PRIORITY', r.priorityCode)} /> },
+          { key: 'status', label: 'Status', width: '10%', render: (r) => <StatusBadge code={r.statusCode} label={labelOf(lookups, 'LEAD_STATUS', r.statusCode)} /> },
+          { key: 'deadline', label: 'Deadline', width: '9%', render: (r) => fmtDate(r.submissionDeadline) },
+          { key: 'outputStatus', label: 'Track', width: '10%', render: (r) => <StatusBadge code={r.outputStatus} label={r.outputStatusLabel} /> },
+          { key: 'act', label: '', width: '9%', render: (r) => (
+            <span className="table-actions">
+              <button className="linkish" type="button" onClick={() => navigate(`/leads/${r.id}`)}>View</button>
+              {has('leads.edit') && <button className="linkish" type="button" onClick={() => navigate(`/leads/${r.id}/edit`)}>Edit</button>}
             </span>
           ) },
         ]}

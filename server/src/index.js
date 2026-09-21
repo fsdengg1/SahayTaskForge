@@ -11,9 +11,15 @@ const app = express();
 const port = Number(process.env.PORT) || 4000;
 
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+const allowedOrigins = [process.env.CLIENT_ORIGIN, 'http://localhost:5173'].filter(Boolean);
 app.use(
   cors({
-    origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin) || /\.ngrok(-free)?\.(dev|app|io)$/.test(origin)) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    },
     credentials: true,
   })
 );

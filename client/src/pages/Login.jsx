@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { homeFor, useAuth } from '../context/AuthContext';
 import ThemeToggle from '../components/ThemeToggle';
-import BrandLogo from '../components/BrandLogo';
 import NavIcon from '../components/NavIcons';
 
 export default function Login() {
@@ -23,8 +22,8 @@ export default function Login() {
     try {
       const user = await login(username, password, remember);
       navigate(user.mustChangePassword ? '/change-password' : (homeFor(user) || '/dashboard'));
-    } catch {
-      setError('Invalid username or password.');
+    } catch (err) {
+      setError(err.message || 'Invalid username or password.');
     } finally {
       setBusy(false);
     }
@@ -32,12 +31,11 @@ export default function Login() {
 
   return (
     <div className="login-wrap">
-      <section className="login-art" aria-hidden="false">
+      <section className="login-art">
         <img className="login-photo" src="/brand/heavy-duty.webp" alt="" />
         <div className="login-overlay" />
         <div className="login-art-inner">
-          <BrandLogo variant="white" />
-          <p className="login-kicker">Sahay Racks</p>
+          <p className="login-kicker">Sahay Racks (P) Ltd</p>
           <h2>Project Tracking System</h2>
           <p>Manage every project from enquiry to installation.</p>
         </div>
@@ -46,18 +44,19 @@ export default function Login() {
       <section className="login-card">
         <ThemeToggle className="icon-btn theme-toggle login-theme" />
         <form className="login-box" onSubmit={onSubmit}>
-          <div className="login-mobile-brand">
-            <BrandLogo variant="color" />
+          <div className="login-form-brand">
+            <img src="/brand/logo-color.jpg" alt="Sahay Racks (P) Ltd" />
           </div>
           <h3>Welcome back</h3>
           <p className="login-sub">Sign in to Sahay Racks Project Tracking</p>
           {error && <div className="notice err">{error}</div>}
           <label className="field">
-            Email / Username
+            Email address
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               autoComplete="username"
+              placeholder="Enter your email address"
               required
             />
           </label>
@@ -68,6 +67,7 @@ export default function Login() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
+              placeholder="Enter your password"
               required
             />
             <button type="button" onClick={() => setShow((s) => !s)} aria-label={show ? 'Hide password' : 'Show password'}>
@@ -87,6 +87,11 @@ export default function Login() {
           <button className="btn login-submit" type="submit" disabled={busy}>
             {busy ? 'Signing in...' : 'SIGN IN'}
           </button>
+          <p className="login-powered">
+            <span>Powered by</span>
+            <img src="/brand/careyu.png" alt="" />
+            <strong>CareYu</strong>
+          </p>
         </form>
       </section>
     </div>
