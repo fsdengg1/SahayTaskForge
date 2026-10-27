@@ -4,6 +4,7 @@ import { api } from '../../services/api';
 import { useLookups } from '../../hooks/useLookups';
 import { fmtDate, fmtDateTime, toInputDate } from '../../utils/format';
 import Modal from '../../components/Modal';
+import { productGroupLabel, statusOptions } from './leadFields';
 
 const CHECKLIST = [
   ['PALLET_DIMS', 'Pallet / material dimensions confirmed'],
@@ -59,6 +60,7 @@ const empty = {
   competitor: '',
   quotationRequiredBy: '',
   decisionMaker: '',
+  productGroup: '',
   outputRequired: 'BOM_DRAWINGS',
   priorityCode: 'MEDIUM',
   statusCode: 'NEW',
@@ -77,6 +79,7 @@ export default function LeadForm() {
   const [checklist, setChecklist] = useState(CHECKLIST.map(([itemCode, label]) => ({ itemCode, label, completed: false })));
   const [customers, setCustomers] = useState([]);
   const [sales, setSales] = useState([]);
+  const [editClock, setEditClock] = useState(null);
   const [photos, setPhotos] = useState([]);
   const [drawings, setDrawings] = useState([]);
   const [errors, setErrors] = useState({});
@@ -84,22 +87,51 @@ export default function LeadForm() {
   const [notice, setNotice] = useState('');
   const [showCustomer, setShowCustomer] = useState(false);
   const [newCust, setNewCust] = useState({ companyName: '', industry: '', address: '', phone: '', email: '' });
+  const [customerError, setCustomerError] = useState('');
   const [preview, setPreview] = useState(null);
+  const [productGroups, setProductGroups] = useState([]);
 
   useEffect(() => {
     api.get('/customers?pageSize=100').then((d) => setCustomers(d.items || [])).catch(() => {});
     api.get('/users?sales=true').then(setSales).catch(() => {});
+    api.get('/leads?pageSize=1').then((d) => setProductGroups(d.productGroups || [])).catch(() => {});
   }, []);
 
   useEffect(() => {
     if (id) return undefined;
-    function loadPreview() {
-      api.get('/leads/deadline-preview').then(setPreview).catch(() => {});
-    }
-    loadPreview();
-    const timer = setInterval(loadPreview, 30000);
-    return () => clearInterval(timer);
+    const params = new URLSearchParams();
+    if (form.leadDate) params.set('leadDate', form.leadDate);
+    api.get(`/leads/deadline-preview?${params.toString()}`).then(setPreview).catch(() => {});
+    return undefined;
+  }, [id, form.leadDate]);
+
+  useEffect(() => {
+    if (!id) return undefined;
+    let active = true;
+    api.get('/leads/deadline-preview')
+      .then((data) => {
+        if (!active) return;
+        setEditClock({ createdAt: data.createdAt, submissionDeadline: data.submissionDeadline });
+      })
+      .catch(() => {});
+    return () => { active = false; };
   }, [id]);
+
+  useEffect(() => {
+    if (!id || !editClock?.createdAt) return undefined;
+    const params = new URLSearchParams({
+      createdAt: editClock.createdAt,
+      outputRequired: form.outputRequired || '',
+    });
+    let active = true;
+    api.get(`/leads/deadline-preview?${params.toString()}`)
+      .then((data) => {
+        if (!active) return;
+        setEditClock((current) => (current ? { ...current, submissionDeadline: data.submissionDeadline } : current));
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [id, editClock?.createdAt, form.outputRequired]);
 
   useEffect(() => {
     if (!id) return;
@@ -113,10 +145,12 @@ export default function LeadForm() {
         designation: lead.contact?.designation || '',
         mobile: lead.contact?.mobile || '',
         email: lead.contact?.email || '',
-        companyAddress: lead.customer?.address || '',
-        plantLocation: lead.site?.address || '',
+        companyAddress: lead.companyAddress || '',
+        plantLocation: lead.plantLocation || '',
+        productGroup: lead.product || lead.productGroup || '',
         ...req,
         leadDate: toInputDate(lead.leadDate),
+        submissionDeadline: lead.submissionDeadline,
         nextFollowUpDate: toInputDate(lead.nextFollowUpDate),
         expectedOrderDate: toInputDate(lead.expectedOrderDate),
         expectedProjectDate: toInputDate(lead.expectedProjectDate),
@@ -147,9 +181,17 @@ export default function LeadForm() {
     setNotice('');
     try {
       if (id) {
-        await api.put(`/leads/${id}`, { ...form, checklist });
+        const updated = await api.put(`/leads/${id}`, {
+          ...form,
+          checklist,
+          restartTracking: true,
+          createdAt: editClock?.createdAt,
+        });
+        setEditClock({
+          createdAt: updated.createdAt,
+          submissionDeadline: updated.submissionDeadline,
+        });
         setNotice('Lead updated successfully.');
-        navigate(`/leads/${id}`);
         return;
       }
       const fd = new FormData();
@@ -172,26 +214,47 @@ export default function LeadForm() {
 
   async function createCustomer(e) {
     e.preventDefault();
-    const created = await api.post('/customers', newCust);
-    setCustomers((c) => [created, ...c]);
-    set('customerId', created.id);
-    set('companyName', created.companyName);
-    set('industry', created.industry || form.industry);
-    setShowCustomer(false);
+    e.stopPropagation();
+    setCustomerError('');
+    try {
+      const created = await api.post('/customers', newCust);
+      setCustomers((c) => [created, ...c]);
+      set('customerId', created.id);
+      set('companyName', created.companyName);
+      set('industry', created.industry || form.industry);
+      if (created.address) set('companyAddress', created.address);
+      setNewCust({ companyName: '', industry: '', address: '', phone: '', email: '' });
+      setShowCustomer(false);
+    } catch (err) {
+      setCustomerError(err.message || 'Unable to create customer.');
+    }
   }
 
   const industries = lookups.INDUSTRY || [];
+  function productGroupOptions(currentLookups, values, current) {
+    const names = new Set();
+    for (const item of currentLookups.STORAGE_METHOD || []) {
+      if (item.label) names.add(item.label);
+    }
+    for (const value of values || []) {
+      const label = productGroupLabel(value, currentLookups);
+      if (label && label !== '—') names.add(label);
+    }
+    if (current) names.add(current);
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }
 
   return (
+    <>
     <form onSubmit={save}>
       <div className="page-head">
         <div>
           <h2>{id ? 'Edit Lead' : 'Create Lead'}</h2>
-          <p>Lead ID is generated automatically on save.</p>
+          <p>{id ? 'This update keeps the existing Lead ID.' : 'Lead ID is generated automatically on save.'}</p>
         </div>
         <div className="btn-row">
           <button className="btn secondary" type="button" onClick={() => navigate(-1)}>Cancel</button>
-          <button className="btn copper" disabled={busy} type="submit">{busy ? 'Saving…' : 'Save Lead'}</button>
+          <button className="btn copper" disabled={busy} type="submit">{busy ? 'Saving…' : (id ? 'Update Lead' : 'Save Lead')}</button>
         </div>
       </div>
       {notice && <div className="notice">{notice}</div>}
@@ -207,13 +270,14 @@ export default function LeadForm() {
               {(lookups.LEAD_SOURCE || []).map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
             </select>
           </label>
-          <label className="field">Customer / Company Name
+          <label className="field">Existing customer
             <select value={form.customerId} onChange={(e) => {
               const c = customers.find((x) => x.id === e.target.value);
               set('customerId', e.target.value);
               if (c) {
                 set('companyName', c.companyName);
                 set('industry', c.industry || form.industry);
+                if (c.address) set('companyAddress', c.address);
               }
             }}>
               <option value="">Select existing customer</option>
@@ -222,14 +286,15 @@ export default function LeadForm() {
           </label>
           <div className="field">
             <span>&nbsp;</span>
-            <button className="btn ghost" type="button" onClick={() => setShowCustomer(true)}>+ Create New Customer</button>
+            <button className="btn ghost" type="button" onClick={() => { setCustomerError(''); setShowCustomer(true); }}>+ Create New Customer</button>
           </div>
-          {!form.customerId && (
-            <label className="field">Or enter company name
-              <input value={form.companyName} onChange={(e) => set('companyName', e.target.value)} />
-              {errors.companyName && <span className="field-error">{errors.companyName}</span>}
-            </label>
-          )}
+          <label className="field">Company Name
+            <input value={form.companyName} onChange={(e) => set('companyName', e.target.value)} required />
+            {errors.companyName && <span className="field-error">{errors.companyName}</span>}
+          </label>
+          <label className="field full">Address
+            <textarea value={form.companyAddress} onChange={(e) => set('companyAddress', e.target.value)} placeholder="Street, area, city" rows={2} />
+          </label>
           <label className="field">Industry
             <input list="industries" value={form.industry} onChange={(e) => set('industry', e.target.value)} />
             <datalist id="industries">{industries.map((i) => <option key={i.code} value={i.label} />)}</datalist>
@@ -244,7 +309,6 @@ export default function LeadForm() {
             <input value={form.email} onChange={(e) => set('email', e.target.value)} />
             {errors.email && <span className="field-error">{errors.email}</span>}
           </label>
-          <label className="field full">Company Address / Location<textarea value={form.companyAddress} onChange={(e) => set('companyAddress', e.target.value)} /></label>
           <label className="field full">Plant / Warehouse Location<input value={form.plantLocation} onChange={(e) => set('plantLocation', e.target.value)} /></label>
         </div>
       </div>
@@ -259,6 +323,12 @@ export default function LeadForm() {
             </select>
           </label>
           <label className="field">Material to be Stored<input value={form.materialToStore} onChange={(e) => set('materialToStore', e.target.value)} /></label>
+          <label className="field">Product Group
+            <input list="product-groups" value={form.productGroup} onChange={(e) => set('productGroup', e.target.value)} placeholder="Select or type a product group" />
+            <datalist id="product-groups">
+              {productGroupOptions(lookups, productGroups, form.productGroup).map((value) => <option key={value} value={value} />)}
+            </datalist>
+          </label>
           <label className="field">Storage Method
             <select value={form.storageMethodCode} onChange={(e) => set('storageMethodCode', e.target.value)}>
               <option value="">Select</option>
@@ -346,12 +416,12 @@ export default function LeadForm() {
           </label>
           <div className="field">
             <span>Submission Deadline</span>
-            <div className="readonly-value">{fmtDate(id ? form.submissionDeadline : preview?.submissionDeadline)}</div>
+            <div className="readonly-value">{fmtDate(id ? editClock?.submissionDeadline : preview?.submissionDeadline)}</div>
             <small className="field-hint">Auto-calculated · System calculated</small>
           </div>
           <div className="field">
             <span>Created</span>
-            <div className="readonly-value">{id ? fmtDateTime(form.createdAt) : fmtDateTime(preview?.createdAt)}</div>
+            <div className="readonly-value">{id ? (editClock ? fmtDateTime(editClock.createdAt) : 'Calculating…') : fmtDateTime(preview?.createdAt)}</div>
             <small className="field-hint">Server time · Asia/Kolkata</small>
           </div>
           <label className="field">Lead Priority
@@ -361,10 +431,7 @@ export default function LeadForm() {
           </label>
           <label className="field">Current Status
             <select value={form.statusCode} onChange={(e) => set('statusCode', e.target.value)}>
-              {(lookups.LEAD_STATUS || []).map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
-              {form.statusCode && !(lookups.LEAD_STATUS || []).some((s) => s.code === form.statusCode) && (
-                <option value={form.statusCode}>{String(form.statusCode).replaceAll('_', ' ')}</option>
-              )}
+              {statusOptions(lookups, form.statusCode).map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
             </select>
           </label>
           <label className="field">Sales Person
@@ -393,18 +460,20 @@ export default function LeadForm() {
         ))}
       </div>
 
-      {showCustomer && (
-        <Modal title="Create customer" onClose={() => setShowCustomer(false)}>
-          <form onSubmit={createCustomer} className="form-grid">
-            <label className="field full">Company Name<input value={newCust.companyName} onChange={(e) => setNewCust({ ...newCust, companyName: e.target.value })} /></label>
-            <label className="field">Industry<input value={newCust.industry} onChange={(e) => setNewCust({ ...newCust, industry: e.target.value })} /></label>
-            <label className="field">Phone<input value={newCust.phone} onChange={(e) => setNewCust({ ...newCust, phone: e.target.value })} /></label>
-            <label className="field full">Address<textarea value={newCust.address} onChange={(e) => setNewCust({ ...newCust, address: e.target.value })} /></label>
-            <label className="field full">Email<input value={newCust.email} onChange={(e) => setNewCust({ ...newCust, email: e.target.value })} /></label>
-            <button className="btn" type="submit">Save customer</button>
-          </form>
-        </Modal>
-      )}
     </form>
+    {showCustomer && (
+      <Modal title="Create customer" onClose={() => setShowCustomer(false)}>
+        <form onSubmit={createCustomer} className="form-grid">
+          {customerError && <div className="notice err">{customerError}</div>}
+          <label className="field full">Company Name<input value={newCust.companyName} onChange={(e) => setNewCust({ ...newCust, companyName: e.target.value })} required /></label>
+          <label className="field">Industry<input value={newCust.industry} onChange={(e) => setNewCust({ ...newCust, industry: e.target.value })} /></label>
+          <label className="field">Phone<input value={newCust.phone} onChange={(e) => setNewCust({ ...newCust, phone: e.target.value })} /></label>
+          <label className="field full">Address<textarea value={newCust.address} onChange={(e) => setNewCust({ ...newCust, address: e.target.value })} /></label>
+          <label className="field full">Email<input value={newCust.email} onChange={(e) => setNewCust({ ...newCust, email: e.target.value })} /></label>
+          <button className="btn" type="submit">Save customer</button>
+        </form>
+      </Modal>
+    )}
+    </>
   );
 }

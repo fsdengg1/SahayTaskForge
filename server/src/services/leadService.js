@@ -9,6 +9,8 @@ const {
   getOutputSubmissionStatus,
   withDeadlineFields,
   deadlinePreview,
+  calendarDayKey,
+  submissionDeadlineForLeadDate,
   outputRequiredLabel,
   formatDeadlineDate,
   formatIstDateTime,
@@ -116,11 +118,28 @@ function leadWhere(query, user) {
 }
 
 async function listLeads(query, user) {
-  return existingLeads.listLeads(query, user);
+  const result = await existingLeads.listLeads(query, user);
+  try {
+    const customerFeedback = require('./customerFeedbackService');
+    const map = await customerFeedback.summariesByLeadIds(result.items.map((item) => item.id));
+    result.items = result.items.map((item) => ({ ...item, customerFeedback: map[item.id] || { code: 'NOT_REQUIRED', label: 'Not Required' } }));
+  } catch {
+    result.items = result.items.map((item) => ({ ...item, customerFeedback: item.customerFeedback || { code: 'NOT_REQUIRED', label: 'Not Required' } }));
+  }
+  return result;
 }
 
 async function getLead(id) {
-  if (await existingLeads.exists(id)) return existingLeads.getLead(id);
+  if (await existingLeads.exists(id)) {
+    const lead = await existingLeads.getLead(id);
+    try {
+      const customerFeedback = require('./customerFeedbackService');
+      lead.customerFeedback = await customerFeedback.getByLeadId(id);
+    } catch {
+      lead.customerFeedback = null;
+    }
+    return lead;
+  }
   const lead = await prisma.lead.findUnique({ where: { id }, include: leadInclude });
   if (!lead) throw new AppError(404, 'Lead not found.');
   const activity = await prisma.activityLog.findMany({
@@ -148,6 +167,15 @@ async function updateLead(id, data, user) {
     where: { id },
     data: {
       leadDate: data.leadDate ? toDate(data.leadDate) : undefined,
+      submissionDeadline: (data.restartTracking === true || data.restartTracking === 'true')
+        ? calculateLeadSubmissionDeadline(data.createdAt ? new Date(data.createdAt) : new Date())
+        : (data.leadDate && calendarDayKey(data.leadDate) !== calendarDayKey(existing.leadDate)
+          ? submissionDeadlineForLeadDate(data.leadDate)
+          : undefined),
+      createdAt: (data.restartTracking === true || data.restartTracking === 'true')
+        ? (data.createdAt ? new Date(data.createdAt) : new Date())
+        : undefined,
+      outputCompletedAt: (data.restartTracking === true || data.restartTracking === 'true') ? null : undefined,
       sourceCode: data.sourceCode ?? undefined,
       industry: data.industry ?? undefined,
       salesPersonId: data.salesPersonId ?? undefined,
@@ -363,14 +391,20 @@ async function archiveLead(id, user) {
 
 async function convertToProject(leadId, data, user) {
   if (await existingLeads.exists(leadId)) {
-    const lead = await existingLeads.getLead(leadId);
-    if (lead.projects?.length && !data.allowAdditional) {
-      throw new AppError(400, `This lead is already linked to ${lead.projects[0].projectId}.`);
+    const project = await existingLeads.convertLeadToProject(leadId, data, user);
+    try {
+      await logActivity({
+        userId: user.id,
+        action: 'LEAD_CONVERTED',
+        entity: 'Lead',
+        entityId: leadId,
+        newValue: project.projectId,
+        description: `Lead converted to ${project.projectId}`,
+      });
+    } catch {
+      // Activity log uses the app user table. A missing link must not undo the saved project.
     }
-    if (lead.statusCode !== 'WON') {
-      throw new AppError(400, 'A lead can be converted only after status is Won.');
-    }
-    throw new AppError(400, 'This enquiry is already tracked in the existing project records.');
+    return project;
   }
   const lead = await prisma.lead.findUnique({
     where: { id: leadId },
@@ -406,8 +440,20 @@ async function convertToProject(leadId, data, user) {
   return project;
 }
 
-function getDeadlinePreview() {
-  return deadlinePreview(new Date());
+function getDeadlinePreview(query = {}) {
+  const { anchorForLeadDate } = require('../utils/leadDeadline');
+  const source = typeof query === 'string' ? { leadDate: query } : (query || {});
+  let createdAt = new Date();
+  if (source.createdAt) {
+    const parsed = new Date(source.createdAt);
+    if (!Number.isNaN(parsed.getTime())) createdAt = parsed;
+  } else if (source.leadDate) {
+    createdAt = anchorForLeadDate(source.leadDate);
+  }
+  return {
+    ...deadlinePreview(createdAt),
+    outputRequired: source.outputRequired || null,
+  };
 }
 
 async function completeLeadOutput(lead, userId, at = new Date()) {

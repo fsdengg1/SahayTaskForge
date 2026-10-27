@@ -6,6 +6,7 @@ import { fmtDate, fmtDateTime, labelOf, money } from '../../utils/format';
 import StatusBadge from '../../components/StatusBadge';
 import Modal from '../../components/Modal';
 import { useAuth } from '../../context/AuthContext';
+import { leadStatusLabel, productGroupLabel, statusOptions } from './leadFields';
 
 export default function LeadDetail() {
   const { id } = useParams();
@@ -16,6 +17,8 @@ export default function LeadDetail() {
   const [error, setError] = useState('');
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [modalError, setModalError] = useState('');
 
   function load() {
     api.get(`/leads/${id}`).then(setLead).catch((e) => setError(e.message));
@@ -30,27 +33,49 @@ export default function LeadDetail() {
   if (!lead) return <div className="loading">Loading…</div>;
   const req = lead.requirement || {};
 
+  function openConvert() {
+    setModalError('');
+    const linked = lead.projects?.[0];
+    const poDay = linked?.poDate ? String(linked.poDate).slice(0, 10) : '';
+    setForm({
+      name: linked?.name || lead.customer?.companyName || '',
+      poNumber: linked?.poNumber || '',
+      poDate: poDay.length >= 10 ? poDay.slice(0, 10) : '',
+      currency: linked?.currency || lead.budgetCurrency || 'INR',
+      currencyValue: linked?.currencyValue ?? lead.budgetAmount ?? '',
+    });
+    setModal('convert');
+  }
+
   async function submitModal(e) {
     e.preventDefault();
-    if (modal === 'hold') await api.patch(`/leads/${id}/output-hold`, { onHold: true, reason: form.reason });
-    if (modal === 'followup') await api.post(`/leads/${id}/followups`, form);
-    if (modal === 'remark') await api.post(`/leads/${id}/remarks`, { body: form.body });
-    if (modal === 'status') await api.patch(`/leads/${id}/status`, { statusCode: form.statusCode, reason: form.reason });
-    if (modal === 'revision') await api.post(`/leads/${id}/revisions`, form);
-    if (modal === 'document') {
-      const fd = new FormData();
-      fd.append('file', form.file);
-      fd.append('categoryCode', form.categoryCode || 'OTHER');
-      await api.post(`/leads/${id}/documents`, fd);
+    setModalError('');
+    setSaving(true);
+    try {
+      if (modal === 'hold') await api.patch(`/leads/${id}/output-hold`, { onHold: true, reason: form.reason });
+      if (modal === 'followup') await api.post(`/leads/${id}/followups`, form);
+      if (modal === 'remark') await api.post(`/leads/${id}/remarks`, { body: form.body });
+      if (modal === 'status') await api.patch(`/leads/${id}/status`, { statusCode: form.statusCode, reason: form.reason });
+      if (modal === 'revision') await api.post(`/leads/${id}/revisions`, form);
+      if (modal === 'document') {
+        const fd = new FormData();
+        fd.append('file', form.file);
+        fd.append('categoryCode', form.categoryCode || 'OTHER');
+        await api.post(`/leads/${id}/documents`, fd);
+      }
+      if (modal === 'convert') {
+        const project = await api.post(`/leads/${id}/convert`, form);
+        navigate(`/projects/${project.id}`);
+        return;
+      }
+      setModal(null);
+      setForm({});
+      load();
+    } catch (err) {
+      setModalError(err.message || 'Unable to save.');
+    } finally {
+      setSaving(false);
     }
-    if (modal === 'convert') {
-      const project = await api.post(`/leads/${id}/convert`, form);
-      navigate(`/projects/${project.id}`);
-      return;
-    }
-    setModal(null);
-    setForm({});
-    load();
   }
 
   return (
@@ -60,7 +85,7 @@ export default function LeadDetail() {
           <h2>{lead.leadId}</h2>
           <p>{lead.customer?.companyName} · {lead.salesPerson?.fullName || 'Unassigned'}</p>
           <div className="btn-row">
-            <StatusBadge code={lead.statusCode} label={labelOf(lookups, 'LEAD_STATUS', lead.statusCode)} />
+            <StatusBadge code={lead.statusCode} label={leadStatusLabel(lead.statusCode, lookups)} />
             <StatusBadge code={lead.priorityCode} label={labelOf(lookups, 'PRIORITY', lead.priorityCode)} />
             <StatusBadge code={lead.outputStatus} label={lead.outputStatusLabel} />
           </div>
@@ -68,6 +93,20 @@ export default function LeadDetail() {
         <div className="btn-row">
           {has('leads.edit') && <Link className="btn secondary" to={`/leads/${id}/edit`}>Edit</Link>}
           {has('leads.edit') && <button className="btn ghost" onClick={() => setModal('followup')}>Add Follow-up</button>}
+          {(has('customer_feedback.create') || has('customer_feedback.edit') || has('leads.edit')) && (
+            <button
+              className="btn ghost"
+              type="button"
+              onClick={async () => {
+                const record = lead.customerFeedback?.id
+                  ? lead.customerFeedback
+                  : await api.post(`/leads/${id}/customer-feedback`, {});
+                navigate(`/customer-feedback/${record.id}`);
+              }}
+            >
+              {lead.customerFeedback?.id ? 'Customer Feedback' : 'Send to Customer Feedback'}
+            </button>
+          )}
           {has('documents.upload') && <button className="btn ghost" onClick={() => setModal('document')}>Upload Document</button>}
           {has('leads.edit') && <button className="btn ghost" onClick={() => setModal('remark')}>Add Remark</button>}
           {has('leads.edit') && <button className="btn ghost" onClick={() => setModal('status')}>Change Status</button>}
@@ -75,7 +114,7 @@ export default function LeadDetail() {
           {has('leads.edit') && !lead.outputCompletedAt && <button className="btn ghost" onClick={() => api.patch(`/leads/${id}/output`, { completed: true }).then(load)}>Mark Output Submitted</button>}
           {has('leads.edit') && !lead.outputCompletedAt && !lead.outputOnHold && <button className="btn ghost" onClick={() => setModal('hold')}>Place On Hold</button>}
           {has('leads.edit') && lead.outputOnHold && <button className="btn ghost" onClick={() => api.patch(`/leads/${id}/output-hold`, { onHold: false }).then(load)}>Resume Output</button>}
-          {has('leads.convert') && lead.statusCode === 'WON' && <button className="btn copper" onClick={() => setModal('convert')}>Convert to Project</button>}
+          {has('leads.convert') && lead.statusCode === 'WON' && <button className="btn copper" type="button" onClick={openConvert}>Convert to Project</button>}
         </div>
       </div>
 
@@ -83,10 +122,12 @@ export default function LeadDetail() {
         <div className="card">
           <h3>Customer information</h3>
           <p><strong>{lead.customer?.companyName}</strong></p>
+          <p>Address: {lead.locationPending ? '—' : (lead.companyAddress || lead.location || '—')}</p>
+          <p>Product Group: {productGroupLabel(lead.productGroup, lookups)}</p>
+          <p>Sales Person: {lead.salesPerson?.fullName || 'Unassigned'}</p>
           <p>{lead.contact?.name} · {lead.contact?.designation}</p>
           <p>{lead.contact?.mobile} · {lead.contact?.email}</p>
-          <p>{lead.customer?.address}</p>
-          <p>{lead.site?.name} {lead.site?.address}</p>
+          <p>Plant / Warehouse: {lead.plantLocation || '—'}</p>
         </div>
         <div className="card">
           <h3>Output & deadline</h3>
@@ -237,10 +278,7 @@ export default function LeadDetail() {
               <>
                 <label className="field">Status
                   <select onChange={(e) => setForm({ ...form, statusCode: e.target.value })}>
-                    {(lookups.LEAD_STATUS || []).map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
-                    {['APPROVED', 'SUBMITTED', 'FOLLOW_UP'].filter((code) => !(lookups.LEAD_STATUS || []).some((s) => s.code === code)).map((code) => (
-                      <option key={code} value={code}>{code.replaceAll('_', ' ')}</option>
-                    ))}
+                    {statusOptions(lookups).map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
                   </select>
                 </label>
                 <label className="field full">Reason<textarea onChange={(e) => setForm({ ...form, reason: e.target.value })} /></label>
@@ -269,14 +307,40 @@ export default function LeadDetail() {
             )}
             {modal === 'convert' && (
               <>
-                <p className="full">Creates PROJECT-xxx from this won lead. History and documents carry forward.</p>
-                <label className="field">Project Name<input onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-                <label className="field">PO Number<input onChange={(e) => setForm({ ...form, poNumber: e.target.value })} /></label>
-                <label className="field">PO Date<input type="date" onChange={(e) => setForm({ ...form, poDate: e.target.value })} /></label>
-                <label className="field">Order Value<input onChange={(e) => setForm({ ...form, orderValue: e.target.value })} /></label>
+                <p className="full">
+                  {lead.projects?.[0]
+                    ? `Saves these details on ${lead.projects[0].projectId}.`
+                    : 'Creates a project from this won lead and keeps the same lead linked.'}
+                </p>
+                <label className="field">Project Name
+                  <input value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                </label>
+                <label className="field">PO Number
+                  <input value={form.poNumber || ''} onChange={(e) => setForm({ ...form, poNumber: e.target.value })} />
+                </label>
+                <label className="field">PO Date
+                  <input type="date" value={form.poDate || ''} onChange={(e) => setForm({ ...form, poDate: e.target.value })} />
+                </label>
+                <label className="field">Currency
+                  <select value={form.currency || 'INR'} onChange={(e) => setForm({ ...form, currency: e.target.value })}>
+                    {(lookups.CURRENCY?.length ? lookups.CURRENCY : [{ code: 'INR', label: 'INR' }]).map((s) => (
+                      <option key={s.code} value={s.code}>{s.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">Currency Value
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.currencyValue ?? ''}
+                    onChange={(e) => setForm({ ...form, currencyValue: e.target.value })}
+                  />
+                </label>
               </>
             )}
-            <button className="btn" type="submit">Save</button>
+            {modalError && <p className="form-error full">{modalError}</p>}
+            <button className="btn" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
           </form>
         </Modal>
       )}

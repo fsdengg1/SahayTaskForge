@@ -52,4 +52,5 @@ app.use(errorHandler);
 
 app.listen(port, () => {
   console.log(`Sahay Racks API listening on ${port}`);
+  require('./services/customerFeedbackService').ensureAccess().catch((err) => console.error(err));
 });

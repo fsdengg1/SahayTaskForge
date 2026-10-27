@@ -24,35 +24,17 @@ const MANAGEMENT_MENU = [
   item('/health', 'Project Health', 'Executive'),
 
   item('/leads', 'Leads', 'Sales & Pre-Sales'),
+  item('/lead-dashboard', 'Lead Dashboard', 'Sales & Pre-Sales'),
+  item('/sales-enquiry-dashboard', 'Sales Enquiry Dashboard', 'Sales & Pre-Sales'),
+  item('/order-conversion', 'Project to Order Conversion', 'Sales & Pre-Sales'),
   item('/customers', 'Customers', 'Sales & Pre-Sales'),
   item('/quotations', 'Quotations', 'Sales & Pre-Sales'),
   item('/follow-ups', 'Follow-ups', 'Sales & Pre-Sales'),
+  item('/customer-feedback', 'Customer Feedback', 'Sales & Pre-Sales'),
 
   item('/tasks', 'Tasks', 'Project Execution'),
   item('/issues', 'Issues', 'Project Execution'),
   item('/approvals', 'Approvals', 'Project Execution'),
-
-  item('/design', 'Design', 'Design & Engineering'),
-  item('/drawings', 'Drawings & BOQ', 'Design & Engineering'),
-
-  item('/procurement', 'Procurement', 'Procurement'),
-  item('/vendors', 'Vendors', 'Procurement'),
-  item('/purchase-orders', 'Purchase Orders', 'Procurement'),
-
-  item('/planning', 'PPC / Planning', 'PPC & Production'),
-  item('/production', 'Production', 'PPC & Production'),
-
-  item('/quality', 'Quality / QC', 'Quality'),
-  item('/rework', 'Rework / NCR', 'Quality'),
-
-  item('/stores', 'Stores', 'Stores & Logistics'),
-  item('/grn', 'GRN / Material Receipt', 'Stores & Logistics'),
-  item('/dispatch', 'Dispatch', 'Stores & Logistics'),
-
-  item('/installation', 'Installation', 'Installation'),
-  item('/site-readiness', 'Site Readiness', 'Installation'),
-  item('/punch-points', 'Punch Points', 'Installation'),
-  item('/handover', 'Handover', 'Installation'),
 
   item('/finance', 'Finance', 'Commercial'),
   item('/invoices', 'Invoices', 'Commercial'),
@@ -68,20 +50,84 @@ const ADMIN_MENU = [
   item('/settings', 'Settings', 'Administration'),
 ];
 
-export function menuFor(user) {
+const COMMON_GROUPS = new Set([
+  'Executive',
+  'Project Execution',
+  'Commercial',
+  'Information',
+  'Administration',
+]);
+
+const DESIGN_MENU = [
+  item('/design/presales', 'Pre-Sales Design', 'DESIGN'),
+];
+
+const OTR_MENU = [
+  item('/otr', 'OTR Dashboard', 'OTR'),
+  item('/otr/design', 'Design', 'OTR'),
+  item('/otr/design-activity-log', 'Design Activity Log', 'OTR'),
+  item('/otr/procurement', 'Procurement', 'OTR'),
+  item('/otr/production', 'Production', 'OTR'),
+  item('/otr/manufacturing-lead-time', 'Manufacturing & Lead Time', 'OTR'),
+  item('/otr/installation', 'Installation', 'OTR'),
+  item('/otr/vendor-management', 'Vendor Management', 'OTR'),
+];
+
+const COMMON_MENU = [
+  ...MANAGEMENT_MENU.filter((entry) => COMMON_GROUPS.has(entry.group)),
+  ...OTR_MENU,
+  ...DESIGN_MENU,
+  ...ADMIN_MENU,
+];
+
+const GROUP_ORDER = [
+  'Executive',
+  'Sales & Pre-Sales',
+  'OTR',
+  'DESIGN',
+  'Sales',
+  'Project Execution',
+  'Work',
+  'Commercial',
+  'Information',
+  'Administration',
+  'Overview',
+];
+
+function withCommonSections(roleItems) {
+  const seen = new Set();
+  const grouped = new Map();
+  for (const entry of [...COMMON_MENU, ...roleItems]) {
+    if (seen.has(entry.to)) continue;
+    seen.add(entry.to);
+    const list = grouped.get(entry.group) || [];
+    list.push(entry);
+    grouped.set(entry.group, list);
+  }
+  const rank = new Map(GROUP_ORDER.map((name, index) => [name, index]));
+  return [...grouped.entries()]
+    .sort((a, b) => (rank.get(a[0]) ?? 99) - (rank.get(b[0]) ?? 99))
+    .flatMap(([, entries]) => entries);
+}
+
+function sectionsFor(user) {
   const codes = roleCodes(user);
   const has = (list) => codes.some((c) => list.includes(c));
 
   if (has(['CEO', 'SAHAY_MD', 'ENG_DIRECTOR', 'CFT', 'ADMIN'])) {
-    return has(['ADMIN']) ? [...MANAGEMENT_MENU, ...ADMIN_MENU] : MANAGEMENT_MENU;
+    return MANAGEMENT_MENU;
   }
   if (has(['SALES_MANAGER', 'SALES_EXEC', 'SALES_COORD'])) {
     return [
       item('/dashboard', 'Dashboard', 'Sales'),
-      item('/leads', 'Leads', 'Sales'),
-      item('/customers', 'Customers', 'Sales'),
-      item('/quotations', 'Quotations', 'Sales'),
-      item('/follow-ups', 'Follow-ups', 'Sales'),
+      item('/leads', 'Leads', 'Sales & Pre-Sales'),
+      item('/lead-dashboard', 'Lead Dashboard', 'Sales & Pre-Sales'),
+      item('/sales-enquiry-dashboard', 'Sales Enquiry Dashboard', 'Sales & Pre-Sales'),
+      item('/order-conversion', 'Project to Order Conversion', 'Sales & Pre-Sales'),
+      item('/customers', 'Customers', 'Sales & Pre-Sales'),
+      item('/quotations', 'Quotations', 'Sales & Pre-Sales'),
+      item('/follow-ups', 'Follow-ups', 'Sales & Pre-Sales'),
+      item('/customer-feedback', 'Customer Feedback', 'Sales & Pre-Sales'),
       item('/projects', 'Projects', 'Work'),
       item('/tasks', 'Tasks', 'Work'),
       item('/documents', 'Documents', 'Work'),
@@ -89,10 +135,8 @@ export function menuFor(user) {
   }
   if (has(['DESIGN_MANAGER', 'DESIGN_ENG'])) {
     return [
-      item('/dashboard', 'Dashboard', 'Design'),
-      item('/projects', 'Projects', 'Design'),
-      item('/design', 'Design', 'Design'),
-      item('/drawings', 'Drawings & BOQ', 'Design'),
+      item('/dashboard', 'Dashboard', 'Sales & Pre-Sales'),
+      item('/projects', 'Projects', 'Work'),
       item('/tasks', 'Tasks', 'Work'),
       item('/documents', 'Documents', 'Work'),
     ];
@@ -108,69 +152,12 @@ export function menuFor(user) {
       item('/documents', 'Documents', 'Information'),
     ];
   }
-  if (has(['PROC_MANAGER', 'PURCHASE_EXEC'])) {
+  if (has(['PROC_MANAGER', 'PURCHASE_EXEC', 'PPC_MANAGER', 'PROD_SUPER', 'QC_MANAGER', 'QC_ENG', 'STORES', 'LOGISTICS', 'INSTALL_MANAGER', 'SITE_ENG'])) {
     return [
-      item('/dashboard', 'Dashboard', 'Procurement'),
-      item('/projects', 'Projects', 'Procurement'),
-      item('/procurement', 'Procurement', 'Procurement'),
-      item('/vendors', 'Vendors', 'Procurement'),
-      item('/purchase-orders', 'Purchase Orders', 'Procurement'),
+      item('/dashboard', 'Dashboard', 'Sales & Pre-Sales'),
+      item('/projects', 'Projects', 'Work'),
       item('/tasks', 'Tasks', 'Work'),
       item('/documents', 'Documents', 'Work'),
-    ];
-  }
-  if (has(['PPC_MANAGER'])) {
-    return [
-      item('/dashboard', 'Dashboard', 'Planning'),
-      item('/projects', 'Projects', 'Planning'),
-      item('/planning', 'Planning', 'Planning'),
-      item('/tasks', 'Tasks', 'Planning'),
-    ];
-  }
-  if (has(['PROD_SUPER'])) {
-    return [
-      item('/dashboard', 'Dashboard', 'Production'),
-      item('/projects', 'Projects', 'Production'),
-      item('/production', 'Production', 'Production'),
-      item('/tasks', 'Tasks', 'Production'),
-    ];
-  }
-  if (has(['QC_MANAGER', 'QC_ENG'])) {
-    return [
-      item('/dashboard', 'Dashboard', 'Quality'),
-      item('/projects', 'Projects', 'Quality'),
-      item('/quality', 'Quality', 'Quality'),
-      item('/rework', 'Rework / NCR', 'Quality'),
-      item('/documents', 'Documents', 'Quality'),
-    ];
-  }
-  if (has(['STORES'])) {
-    return [
-      item('/dashboard', 'Dashboard', 'Stores'),
-      item('/projects', 'Projects', 'Stores'),
-      item('/stores', 'Stores', 'Stores'),
-      item('/grn', 'GRN', 'Stores'),
-      item('/stock', 'Stock', 'Stores'),
-      item('/documents', 'Documents', 'Stores'),
-    ];
-  }
-  if (has(['LOGISTICS'])) {
-    return [
-      item('/dashboard', 'Dashboard', 'Logistics'),
-      item('/projects', 'Projects', 'Logistics'),
-      item('/dispatch', 'Dispatch', 'Logistics'),
-      item('/documents', 'Documents', 'Logistics'),
-    ];
-  }
-  if (has(['INSTALL_MANAGER', 'SITE_ENG'])) {
-    return [
-      item('/dashboard', 'Dashboard', 'Installation'),
-      item('/projects', 'Projects', 'Installation'),
-      item('/installation', 'Installation', 'Installation'),
-      item('/site-readiness', 'Site Readiness', 'Installation'),
-      item('/punch-points', 'Punch Points', 'Installation'),
-      item('/handover', 'Handover', 'Installation'),
-      item('/documents', 'Documents', 'Installation'),
     ];
   }
   if (has(['FINANCE'])) {
@@ -187,4 +174,8 @@ export function menuFor(user) {
     item('/dashboard', 'Dashboard', 'Overview'),
     item('/projects', 'Projects', 'Overview'),
   ];
+}
+
+export function menuFor(user) {
+  return withCommonSections(sectionsFor(user));
 }

@@ -25,7 +25,7 @@ export default function DesignPage() {
           <KpiCard label="Overdue" value={dash.kpis.overdue} tone="danger" />
           <KpiCard label="Revision requests" value={dash.kpis.revisions} />
           <KpiCard label="Completed" value={dash.kpis.completed} tone="ok" />
-          <KpiCard label="On Time" value={dash.kpis.outputOnTime} tone="ok" />
+          <KpiCard label="In Progress" value={dash.kpis.outputOnTime} tone="ok" />
           <KpiCard label="Overdue" value={dash.kpis.outputOverdue} tone="danger" />
           <KpiCard label="Delayed 1–3 Days" value={dash.kpis.outputDelayed13} tone="warn" />
           <KpiCard label="Delayed >3 Days" value={dash.kpis.outputDelayedOver3} />

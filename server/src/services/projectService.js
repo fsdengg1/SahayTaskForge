@@ -18,6 +18,16 @@ const projectInclude = {
   orders: { include: { items: true } },
 };
 
+function currencyAmount(data, fallback) {
+  const raw = data.currencyValue != null && data.currencyValue !== '' ? data.currencyValue : data.orderValue;
+  if (raw == null || raw === '') return fallback ?? null;
+  const amount = Number(raw);
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new AppError(400, 'Enter a valid currency value.');
+  }
+  return amount;
+}
+
 async function stageTemplates() {
   return prisma.lookup.findMany({
     where: { type: 'PROJECT_STAGE', active: true },
@@ -55,7 +65,7 @@ async function createProjectFromLead(lead, data, user) {
       orderNumber: data.orderNumber || null,
       poNumber: data.poNumber || null,
       poDate: data.poDate ? new Date(data.poDate) : null,
-      orderValue: data.orderValue != null ? Number(data.orderValue) : lead.budgetAmount,
+      orderValue: currencyAmount(data, lead.budgetAmount),
       currency: data.currency || lead.budgetCurrency || 'INR',
       startDate: data.startDate ? new Date(data.startDate) : new Date(),
       expectedCompletion: data.expectedCompletion ? new Date(data.expectedCompletion) : null,
@@ -220,6 +230,8 @@ function projectWhere(query) {
 }
 
 async function listProjects(query) {
+  const liveProjects = require('./liveProjectStore');
+  if (await liveProjects.hasProjects()) return liveProjects.list(query);
   const { skip, take, page, pageSize } = parsePagination(query);
   const where = projectWhere(query);
   const [items, total] = await Promise.all([
@@ -270,7 +282,11 @@ async function getProject(id) {
       statusHistory: { orderBy: { createdAt: 'desc' } },
     },
   });
-  if (!project) throw new AppError(404, 'Project not found.');
+  if (!project) {
+    const live = await require('./liveProjectStore').getById(id);
+    if (live) return live;
+    throw new AppError(404, 'Project not found.');
+  }
   const activity = await prisma.activityLog.findMany({
     where: { OR: [{ entity: 'Project', entityId: id }, { entityId: id }] },
     include: { user: { select: { id: true, fullName: true } } },
@@ -344,6 +360,26 @@ async function changeStage(id, stageCode, user, reason) {
 }
 
 async function changeStatus(id, statusCode, reason, user) {
+  if (/^[0-9a-f-]{36}$/i.test(String(id || ''))) {
+    const live = await prisma.$queryRaw`
+      SELECT id, status, project_code FROM projects WHERE id = CAST(${id} AS uuid) LIMIT 1
+    `;
+    if (live[0]) {
+      await prisma.$executeRaw`
+        UPDATE projects SET status = ${statusCode}, updated_at = ${new Date()} WHERE id = CAST(${id} AS uuid)
+      `;
+      await logActivity({
+        userId: user.id,
+        action: 'PROJECT_STATUS_CHANGED',
+        entity: 'Project',
+        entityId: id,
+        oldValue: live[0].status,
+        newValue: statusCode,
+        description: reason || `${live[0].project_code} status changed to ${statusCode}`,
+      });
+      return require('./liveProjectStore').getById(id);
+    }
+  }
   const existing = await prisma.project.findUnique({ where: { id } });
   if (!existing) throw new AppError(404, 'Project not found.');
   await prisma.project.update({ where: { id }, data: { currentStatusCode: statusCode } });

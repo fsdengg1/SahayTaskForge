@@ -107,6 +107,24 @@ async function updateCustomer(id, data, userId) {
   return customer;
 }
 
+async function deleteCustomer(id, userId) {
+  const existing = await prisma.customer.findUnique({ where: { id } });
+  if (!existing || existing.archived) throw new AppError(404, 'Customer not found.');
+  await prisma.customer.update({ where: { id }, data: { archived: true } });
+  try {
+    await logActivity({
+      userId,
+      action: 'CUSTOMER_DELETED',
+      entity: 'Customer',
+      entityId: id,
+      description: `Customer ${existing.customerId} deleted`,
+    });
+  } catch (error) {
+    console.error('Customer was deleted, but the activity log was not.', error);
+  }
+  return { ok: true, id };
+}
+
 async function addContact(customerId, data) {
   return prisma.customerContact.create({
     data: {
@@ -137,6 +155,7 @@ module.exports = {
   listCustomers,
   getCustomer,
   updateCustomer,
+  deleteCustomer,
   addContact,
   addSite,
 };

@@ -87,7 +87,7 @@ export default function ProjectDetail() {
             <h3>Order</h3>
             <p>Lead: {project.lead?.leadId || '—'}</p>
             <p>PO: {project.poNumber || '—'} · {fmtDate(project.poDate)}</p>
-            {has('finance.view') && <p>Value: {money(project.orderValue, project.currency)}</p>}
+            <p>Currency Value: {money(project.currencyValue ?? project.orderValue, project.currency)}</p>
             <p>Start: {fmtDate(project.startDate)} · Expected: {fmtDate(project.expectedCompletion)}</p>
             <p>Sales: {project.salesPerson?.fullName || '—'}</p>
             <p>Site: {project.site?.name || project.site?.address || '—'}</p>

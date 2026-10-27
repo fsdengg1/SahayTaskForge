@@ -19,6 +19,33 @@ router.get(
   })
 );
 
+router.get(
+  '/order-conversion',
+  authorize('projects.view', 'leads.view'),
+  asyncHandler(async (req, res) => {
+    const orders = require('../services/orderConversionService');
+    res.json(await orders.listEligible());
+  })
+);
+
+router.get(
+  '/otr',
+  authorize('projects.view', 'leads.view'),
+  asyncHandler(async (req, res) => {
+    const orders = require('../services/orderConversionService');
+    res.json(await orders.listOtr());
+  })
+);
+
+router.post(
+  '/:id/confirm-order',
+  authorize('projects.edit', 'leads.edit', 'leads.convert'),
+  asyncHandler(async (req, res) => {
+    const orders = require('../services/orderConversionService');
+    res.json(await orders.confirmOrder(req.params.id, req.user));
+  })
+);
+
 router.post(
   '/',
   authorize('projects.create'),

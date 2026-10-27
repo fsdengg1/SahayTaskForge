@@ -1,23 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import { menuFor } from '../utils/roles';
-import NavIcon, { iconForGroup, iconForItem } from './NavIcons';
+import { OtrAccessProvider } from './OtrGate';
+import NavIcon from './NavIcons';
 import ThemeToggle from './ThemeToggle';
-import BrandLogo from './BrandLogo';
-
-const EXPANDED_KEY = 'sahay-sidebar-expanded';
-const SECTIONS_KEY = 'sahay_nav_sections';
-
-function readExpanded() {
-  return localStorage.getItem(EXPANDED_KEY) === 'true';
-}
-
-function pathMatches(to, pathname) {
-  if (to === '/dashboard' || to === '/') return pathname === '/' || pathname === '/dashboard';
-  return pathname === to || pathname.startsWith(`${to}/`);
-}
+import Sidebar from './Sidebar';
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -28,16 +17,8 @@ export default function Layout() {
   const [notes, setNotes] = useState([]);
   const [showNotes, setShowNotes] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [expanded, setExpanded] = useState(readExpanded);
-  const [closedGroups, setClosedGroups] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem(SECTIONS_KEY) || '{}');
-    } catch {
-      return {};
-    }
-  });
-
-  const railCollapsed = !expanded && !mobileOpen;
+  const [otrStages, setOtrStages] = useState([]);
+  const [otrReady, setOtrReady] = useState(false);
 
   useEffect(() => {
     api.get('/notifications').then(setNotes).catch(() => setNotes([]));
@@ -58,100 +39,43 @@ export default function Layout() {
     setMobileOpen(false);
   }, [location.pathname]);
 
+  useEffect(() => {
+    let active = true;
+    api.get('/projects/otr')
+      .then((data) => {
+        if (active) setOtrStages(data.unlockedStages || []);
+      })
+      .catch(() => {
+        if (active) setOtrStages([]);
+      })
+      .finally(() => {
+        if (active) setOtrReady(true);
+      });
+    return () => { active = false; };
+  }, [location.pathname]);
+
   const unread = notes.filter((n) => !n.readAt).length;
   const role = user?.roles?.[0]?.name || 'User';
-  const menu = menuFor(user);
-  const groups = useMemo(() => menu.reduce((acc, item) => {
-    const name = item.group || '';
-    const last = acc[acc.length - 1];
-    if (!last || last.name !== name) acc.push({ name, items: [item] });
-    else last.items.push(item);
-    return acc;
-  }, []), [menu]);
+  const initials = (user?.fullName || 'U')
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join('');
+  const menu = useMemo(() => menuFor(user, otrStages), [user, otrStages]);
 
-  function toggleExpanded() {
-    setExpanded((current) => {
-      const next = !current;
-      localStorage.setItem(EXPANDED_KEY, String(next));
-      return next;
-    });
-  }
-
-  function toggleGroup(name) {
-    setClosedGroups((cur) => {
-      const next = { ...cur, [name]: !cur[name] };
-      localStorage.setItem(SECTIONS_KEY, JSON.stringify(next));
-      return next;
-    });
-  }
-
-  function groupActive(group) {
-    return group.items.some((item) => pathMatches(item.to, location.pathname));
+  function openNote(note) {
+    api.patch(`/notifications/${note.id}/read`).catch(() => {});
+    setNotes((current) => current.map((item) => (
+      item.id === note.id ? { ...item, readAt: item.readAt || new Date().toISOString() } : item
+    )));
+    setShowNotes(false);
+    if (note.link) navigate(note.link);
   }
 
   return (
-    <div className={`app-shell ${railCollapsed ? 'nav-collapsed' : ''}`}>
-      <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}>
-        <div className="brand" data-tooltip={railCollapsed ? 'Sahay Racks' : undefined}>
-          <BrandLogo variant={railCollapsed ? 'color' : 'white'} compact={railCollapsed} />
-          {!railCollapsed && (
-            <>
-              <h1>Sahay Racks</h1>
-              <p>Project Tracking</p>
-            </>
-          )}
-        </div>
-        <nav className="nav">
-          {groups.map((g) => {
-            const open = !closedGroups[g.name];
-            if (railCollapsed) {
-              const home = g.items[0];
-              return (
-                <div key={g.name || home.to} className="nav-section">
-                  <NavLink
-                    to={home.to}
-                    end={home.to === '/' || home.to === '/dashboard'}
-                    data-tooltip={g.name || home.label}
-                    className={groupActive(g) ? 'active' : undefined}
-                  >
-                    <NavIcon name={iconForGroup(g.name)} />
-                  </NavLink>
-                </div>
-              );
-            }
-            return (
-              <div key={g.name || 'menu'} className="nav-section">
-                {g.name && (
-                  <button type="button" className="nav-group" onClick={() => toggleGroup(g.name)}>
-                    <span>{g.name}</span>
-                    <em>{open ? '▾' : '▸'}</em>
-                  </button>
-                )}
-                {open && g.items.map((m) => (
-                  <NavLink
-                    key={m.to}
-                    to={m.to}
-                    end={m.to === '/' || m.to === '/dashboard'}
-                    className={pathMatches(m.to, location.pathname) ? 'active' : undefined}
-                  >
-                    <NavIcon name={iconForItem(m.to)} />
-                    <span className="nav-label">{m.label}</span>
-                  </NavLink>
-                ))}
-              </div>
-            );
-          })}
-        </nav>
-        <button
-          className="nav-collapse"
-          type="button"
-          onClick={toggleExpanded}
-          data-tooltip={railCollapsed ? 'Expand sidebar' : undefined}
-          title={railCollapsed ? 'Expand sidebar' : 'Collapse'}
-        >
-          {railCollapsed ? '»' : '« Collapse'}
-        </button>
-      </aside>
+    <div className="app-shell">
+      <Sidebar menu={menu} pathname={location.pathname} mobileOpen={mobileOpen} />
       <div className="main">
         <header className="topbar">
           <button className="icon-btn mobile-nav" type="button" onClick={() => setMobileOpen((v) => !v)} aria-label="Menu">
@@ -177,10 +101,13 @@ export default function Layout() {
               {unread > 0 && <span className="badge-dot">{unread}</span>}
             </button>
             <div className="user-chip">
-              <strong>{user?.fullName}</strong>
-              <span>{role}</span>
+              <span className="user-avatar" aria-hidden="true">{initials}</span>
+              <span className="user-meta">
+                <strong>{user?.fullName}</strong>
+                <span>{role}</span>
+              </span>
             </div>
-            <button className="btn secondary" type="button" onClick={() => { logout(); navigate('/login'); }}>Logout</button>
+            <button className="btn ghost top-logout" type="button" onClick={() => { logout(); navigate('/login'); }}>Log out</button>
           </div>
         </header>
         {showNotes && (
@@ -191,17 +118,19 @@ export default function Layout() {
             </div>
             {notes.length === 0 && <div className="empty">No notifications.</div>}
             {notes.map((n) => (
-              <div key={n.id} className="check-row">
+              <button key={n.id} className="check-row note-item" type="button" onClick={() => openNote(n)}>
                 <div>
                   <strong>{n.title}</strong>
                   <p>{n.message}</p>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
         <div className="page">
-          <Outlet />
+          <OtrAccessProvider ready={otrReady} unlocked={otrStages}>
+            <Outlet />
+          </OtrAccessProvider>
         </div>
       </div>
     </div>

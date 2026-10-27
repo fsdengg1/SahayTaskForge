@@ -4,6 +4,7 @@ const { authenticate } = require('../middleware/auth');
 const { authorize } = require('../middleware/authorize');
 const { upload } = require('../middleware/upload');
 const { asyncHandler } = require('../utils/asyncHandler');
+const { AppError } = require('../utils/errors');
 const { prisma } = require('../prisma');
 
 const lookupService = require('../services/lookupService');
@@ -21,12 +22,26 @@ const importService = require('../services/importService');
 const authRoutes = require('./auth');
 const leadRoutes = require('./leads');
 const projectRoutes = require('./projects');
+const designRoutes = require('./design');
+const lifecycleRoutes = require('./lifecycle');
+const productionTrackingRoutes = require('./productionTracking');
+const installationTrackingRoutes = require('./installationTracking');
+const manufacturingTrackingRoutes = require('./manufacturingTracking');
+const procurementTrackingRoutes = require('./procurementTracking');
+const vendorTrackingRoutes = require('./vendorTracking');
 
 const router = express.Router();
 
 router.use('/auth', authRoutes);
 router.use('/leads', leadRoutes);
 router.use('/projects', projectRoutes);
+router.use('/design', designRoutes);
+router.use('/lifecycle', lifecycleRoutes);
+router.use('/production/tracking', productionTrackingRoutes);
+router.use('/installation/tracking', installationTrackingRoutes);
+router.use('/manufacturing/tracking', manufacturingTrackingRoutes);
+router.use('/procurement/tracking', procurementTrackingRoutes);
+router.use('/vendors/tracking', vendorTrackingRoutes);
 
 router.get(
   '/lookups',
@@ -77,6 +92,15 @@ router.put(
   authorize('customers.edit'),
   asyncHandler(async (req, res) => {
     res.json(await customerService.updateCustomer(req.params.id, req.body, req.user.id));
+  })
+);
+
+router.delete(
+  '/customers/:id',
+  authenticate,
+  authorize('customers.edit'),
+  asyncHandler(async (req, res) => {
+    res.json(await customerService.deleteCustomer(req.params.id, req.user.id));
   })
 );
 
@@ -683,6 +707,46 @@ router.get(
 );
 
 router.get(
+  '/customer-feedback',
+  authenticate,
+  authorize('customer_feedback.view', 'leads.view', 'dashboard.management'),
+  asyncHandler(async (req, res) => {
+    const customerFeedback = require('../services/customerFeedbackService');
+    res.json(await customerFeedback.list(req.query));
+  })
+);
+
+router.post(
+  '/customer-feedback',
+  authenticate,
+  authorize('customer_feedback.create', 'customer_feedback.edit', 'leads.edit'),
+  asyncHandler(async (req, res) => {
+    const customerFeedback = require('../services/customerFeedbackService');
+    res.status(201).json(await customerFeedback.create(req.body, req.user));
+  })
+);
+
+router.get(
+  '/customer-feedback/:id',
+  authenticate,
+  authorize('customer_feedback.view', 'leads.view', 'dashboard.management'),
+  asyncHandler(async (req, res) => {
+    const customerFeedback = require('../services/customerFeedbackService');
+    res.json(await customerFeedback.getById(req.params.id));
+  })
+);
+
+router.patch(
+  '/customer-feedback/:id',
+  authenticate,
+  authorize('customer_feedback.edit', 'leads.edit'),
+  asyncHandler(async (req, res) => {
+    const customerFeedback = require('../services/customerFeedbackService');
+    res.json(await customerFeedback.update(req.params.id, req.body, req.user));
+  })
+);
+
+router.get(
   '/reports/:type',
   authenticate,
   authorize('reports.view'),
@@ -716,7 +780,12 @@ router.patch(
   '/notifications/:id/read',
   authenticate,
   asyncHandler(async (req, res) => {
-    res.json(await prisma.notification.update({ where: { id: req.params.id }, data: { readAt: new Date() } }));
+    const updated = await prisma.notification.updateMany({
+      where: { id: req.params.id, userId: req.user.id },
+      data: { readAt: new Date() },
+    });
+    if (!updated.count) throw new AppError(404, 'Notification not found.');
+    res.json({ ok: true });
   })
 );
 

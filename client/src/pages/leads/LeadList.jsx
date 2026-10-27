@@ -6,6 +6,15 @@ import { fmtDate, labelOf } from '../../utils/format';
 import StatusBadge from '../../components/StatusBadge';
 import DataTable from '../../components/DataTable';
 import { useAuth } from '../../context/AuthContext';
+import { LEAD_STATUSES, LocationValue, leadStatusLabel, outputRequiredDisplay, productGroupLabel, trackStatusLabel } from './leadFields';
+import PendingList from './PendingList';
+
+function dashboardQuery(params) {
+  const next = new URLSearchParams(params);
+  next.delete('returnTo');
+  next.delete('page');
+  return next.toString();
+}
 
 export default function LeadList() {
   const lookups = useLookups();
@@ -18,8 +27,19 @@ export default function LeadList() {
   const [error, setError] = useState('');
   const q = Object.fromEntries(params.entries());
 
+  const pendingView = q.view === 'pending' || q.status === 'PENDING';
+
   function load() {
-    api.get(`/leads?${params.toString()}`).then(setData).catch((e) => setError(e.message));
+    const query = new URLSearchParams(params);
+    if (!query.get('pageSize')) query.set('pageSize', '100');
+    if (pendingView) {
+      query.delete('status');
+      query.set('view', 'pending');
+      query.set('pageSize', '100');
+      query.set('sort', 'leadDate');
+      query.set('dir', 'asc');
+    }
+    api.get(`/leads?${query.toString()}`).then(setData).catch((e) => setError(e.message));
   }
 
   useEffect(() => {
@@ -35,8 +55,24 @@ export default function LeadList() {
 
   function set(key, value) {
     const next = new URLSearchParams(params);
+    if (key === 'status' && value === 'PENDING') {
+      next.delete('status');
+      next.set('view', 'pending');
+      next.set('page', '1');
+      setParams(next);
+      return;
+    }
+    if (key === 'status') next.delete('view');
     if (value) next.set(key, value); else next.delete(key);
     if (key !== 'page') next.set('page', '1');
+    setParams(next);
+  }
+
+  function closePending() {
+    const next = new URLSearchParams(params);
+    next.delete('view');
+    next.delete('status');
+    next.set('page', '1');
     setParams(next);
   }
 
@@ -45,10 +81,16 @@ export default function LeadList() {
       <div className="page-head">
         <div>
           <p className="eyebrow">Sales & Pre-Sales</p>
-          <h2>Leads</h2>
-          <p>{data.total} records · output submission tracking</p>
+          <h2>{pendingView ? 'Pending List' : 'Leads'}</h2>
+          <p>{pendingView ? `${data.total} open enquiries · drawing and layout status` : `${data.total} records · output submission tracking`}</p>
         </div>
-        {has('leads.create') && <Link className="btn copper" to="/leads/new">+ Create Lead</Link>}
+        <span className="btn-row">
+          {pendingView && <button className="btn ghost" type="button" onClick={closePending}>All leads</button>}
+          {q.returnTo === 'lead-dashboard' && (
+            <Link className="btn ghost" to={`/lead-dashboard?${dashboardQuery(params)}`}>Back to Lead Dashboard</Link>
+          )}
+          {has('leads.create') && <Link className="btn copper" to="/leads/new">+ Create Lead</Link>}
+        </span>
       </div>
       <div className="filters leads-filters">
         <input placeholder="Search" defaultValue={q.q} onBlur={(e) => set('q', e.target.value)} />
@@ -58,14 +100,15 @@ export default function LeadList() {
         </select>
         <select value={q.outputStatus || ''} onChange={(e) => set('outputStatus', e.target.value)}>
           <option value="">All</option>
-          {(lookups.OUTPUT_SUBMISSION_STATUS || []).map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
+          {(lookups.OUTPUT_SUBMISSION_STATUS || []).map((s) => <option key={s.code} value={s.code}>{trackStatusLabel(s.code, lookups)}</option>)}
         </select>
-        <select value={q.status || ''} onChange={(e) => set('status', e.target.value)}>
+        <select value={pendingView ? 'PENDING' : (q.status || '')} onChange={(e) => set('status', e.target.value)}>
           <option value="">All statuses</option>
-          {(lookups.LEAD_STATUS || []).map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
-          {['APPROVED', 'SUBMITTED', 'FOLLOW_UP'].filter((code) => !(lookups.LEAD_STATUS || []).some((s) => s.code === code)).map((code) => (
-            <option key={code} value={code}>{code.replaceAll('_', ' ')}</option>
-          ))}
+          {(data.statuses?.length ? data.statuses : LEAD_STATUSES).map((s) => <option key={s.code} value={s.code}>{leadStatusLabel(s.code, lookups) || s.label}</option>)}
+        </select>
+        <select value={q.location || ''} onChange={(e) => set('location', e.target.value)}>
+          <option value="">All locations</option>
+          {(data.locations || []).map((loc) => <option key={loc.code} value={loc.code}>{loc.label}</option>)}
         </select>
         <select value={q.archived || ''} onChange={(e) => set('archived', e.target.value)}>
           <option value="">Active</option>
@@ -84,20 +127,33 @@ export default function LeadList() {
         <input type="date" title="Deadline date" value={q.deadlineDate || ''} onChange={(e) => set('deadlineDate', e.target.value)} />
       </div>
       {error && <div className="notice err">{error}</div>}
+      {pendingView ? (
+        <PendingList rows={data.items} lookups={lookups} page={data.page} pageSize={data.pageSize || 100} />
+      ) : (
       <DataTable
         fit
         rows={data.items}
         empty="No leads found."
         columns={[
-          { key: 'leadId', label: 'Lead ID', width: '16%', wrap: true, render: (r) => <Link to={`/leads/${r.id}`}>{r.leadId}</Link> },
-          { key: 'customer', label: 'Customer', width: '17%', wrap: true, render: (r) => r.customer?.companyName },
-          { key: 'output', label: 'Output', width: '11%', wrap: true, render: (r) => r.outputRequiredLabel || labelOf(lookups, 'OUTPUT_REQUIRED', r.outputRequired) },
-          { key: 'sales', label: 'Sales', width: '10%', wrap: true, render: (r) => r.salesPerson?.fullName || '—' },
-          { key: 'priority', label: 'Priority', width: '8%', render: (r) => <StatusBadge code={r.priorityCode} label={labelOf(lookups, 'PRIORITY', r.priorityCode)} /> },
-          { key: 'status', label: 'Status', width: '10%', render: (r) => <StatusBadge code={r.statusCode} label={labelOf(lookups, 'LEAD_STATUS', r.statusCode)} /> },
-          { key: 'deadline', label: 'Deadline', width: '9%', render: (r) => fmtDate(r.submissionDeadline) },
-          { key: 'outputStatus', label: 'Track', width: '10%', render: (r) => <StatusBadge code={r.outputStatus} label={r.outputStatusLabel} /> },
-          { key: 'act', label: '', width: '9%', render: (r) => (
+          { key: 'leadId', label: 'Lead ID', width: '10%', cellClass: 'is-clip', title: (r) => r.leadId, render: (r) => <Link className="cell-clip" to={`/leads/${r.id}`}>{r.leadId}</Link> },
+          { key: 'customer', label: 'Company Name', width: '10%', wrap: true, cellClass: 'is-clamp', title: (r) => r.customer?.companyName, render: (r) => <span className="cell-clamp">{r.customer?.companyName || '—'}</span> },
+          { key: 'location', label: 'Location', width: '10%', wrap: true, cellClass: 'is-clamp', title: (r) => (r.locationPending || !r.location ? 'Location Pending' : r.location), render: (r) => (
+            r.locationPending || !r.location || r.location === 'Location Pending'
+              ? <LocationValue pending label={r.location} />
+              : <span className="cell-clamp">{r.location}</span>
+          ) },
+          { key: 'productGroup', label: 'Product Group', width: '13%', wrap: true, cellClass: 'is-product', title: (r) => productGroupLabel(r.productGroup, lookups), render: (r) => <span className="cell-product">{productGroupLabel(r.productGroup, lookups)}</span> },
+          { key: 'output', label: 'Output', width: '12%', wrap: true, cellClass: 'is-output', title: (r) => outputRequiredDisplay(r, lookups), render: (r) => <span className="cell-output">{outputRequiredDisplay(r, lookups)}</span> },
+          { key: 'sales', label: 'Sales Person', width: '9%', cellClass: 'is-clip', title: (r) => r.salesPerson?.fullName || '—', render: (r) => <span className="cell-clip">{r.salesPerson?.fullName || '—'}</span> },
+          { key: 'priority', label: 'Priority', width: '7%', render: (r) => <StatusBadge code={r.priorityCode} label={labelOf(lookups, 'PRIORITY', r.priorityCode)} /> },
+          { key: 'status', label: 'Status', width: '7%', render: (r) => (
+            r.statusCode === 'PENDING'
+              ? <button className="badge-btn" type="button" onClick={() => set('status', 'PENDING')} aria-label="Open pending list"><StatusBadge code={r.statusCode} label={leadStatusLabel(r.statusCode, lookups)} /></button>
+              : <StatusBadge code={r.statusCode} label={leadStatusLabel(r.statusCode, lookups)} />
+          ) },
+          { key: 'deadline', label: 'Deadline', width: '7%', cellClass: 'is-clip', title: (r) => fmtDate(r.submissionDeadline), render: (r) => <span className="cell-clip">{fmtDate(r.submissionDeadline)}</span> },
+          { key: 'outputStatus', label: 'Track', width: '8%', title: (r) => r.outputStatusLabel, render: (r) => <StatusBadge code={r.outputStatus} label={r.outputStatusLabel} /> },
+          { key: 'act', label: 'Actions', width: '7%', align: 'right', cellClass: 'is-actions', render: (r) => (
             <span className="table-actions">
               <button className="linkish" type="button" onClick={() => navigate(`/leads/${r.id}`)}>View</button>
               {has('leads.edit') && <button className="linkish" type="button" onClick={() => navigate(`/leads/${r.id}/edit`)}>Edit</button>}
@@ -105,7 +161,8 @@ export default function LeadList() {
           ) },
         ]}
       />
-      <div className="btn-row" style={{ marginTop: 12 }}>
+      )}
+      <div className="btn-row pager">
         <button className="btn secondary" type="button" disabled={data.page <= 1} onClick={() => set('page', String(data.page - 1))}>Previous</button>
         <span>Page {data.page} of {data.pageCount || 1}</span>
         <button className="btn secondary" type="button" disabled={data.page >= (data.pageCount || 1)} onClick={() => set('page', String(data.page + 1))}>Next</button>

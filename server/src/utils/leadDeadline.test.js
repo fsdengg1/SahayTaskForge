@@ -16,7 +16,7 @@ const onTime = getOutputSubmissionStatus({
   submissionDeadline: deadline,
   now: new Date('2026-09-23T12:29:00.000Z'),
 });
-assert(onTime.status === 'ON_TIME', `5:59 PM should be ON TIME, got ${onTime.status}`);
+assert(onTime.status === 'ON_TIME' && onTime.label === 'IN PROGRESS', `5:59 PM should stay ON_TIME and display IN PROGRESS, got ${onTime.status} ${onTime.label}`);
 
 const overdue = getOutputSubmissionStatus({
   submissionDeadline: deadline,

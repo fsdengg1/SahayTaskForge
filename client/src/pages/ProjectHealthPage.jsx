@@ -1,97 +1,59 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
-import { fmtDate, labelOf } from '../utils/format';
-import { useLookups } from '../hooks/useLookups';
 import KpiCard from '../components/KpiCard';
-import StatusBadge from '../components/StatusBadge';
 import DataTable from '../components/DataTable';
-import DonutChart from '../components/DonutChart';
+
+function HealthPill({ item }) {
+  if (!item) return '—';
+  return <span className={`health-pill tone-${item.tone || 'grey'}`}>{item.label}</span>;
+}
 
 export default function ProjectHealthPage() {
-  const lookups = useLookups();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   useEffect(() => {
     api.get('/dashboard/management').then(setData).catch(() => {});
   }, []);
   if (!data) return <div className="loading">Loading project health…</div>;
-  const health = data.projectHealth || [];
-  const atRisk = health.find((h) => h.code === 'AT_RISK')?.count || 0;
+  const rows = data.projectHealthRows || [];
+  const count = (tone) => rows.filter((row) => row.overall?.tone === tone).length;
 
   return (
     <div>
       <div className="page-head">
         <div>
+          <p className="eyebrow">Executive</p>
           <h2>Project Health</h2>
-          <p>Portfolio health, department load, delays and upcoming deadlines.</p>
+          <p>Schedule, task, issue and approval health calculated from the current projects.</p>
         </div>
       </div>
       <div className="kpi-grid exec-kpis">
-        <KpiCard label="On Track" value={data.kpis?.onTrack} tone="ok" onClick={() => navigate('/projects?status=ON_TRACK')} />
-        <KpiCard label="At Risk" value={atRisk} tone="warn" onClick={() => navigate('/projects')} />
-        <KpiCard label="Delayed" value={data.kpis?.delayed} tone="danger" onClick={() => navigate('/projects?delayed=true')} />
-        <KpiCard label="Blocked" value={data.kpis?.blocked} tone="danger" onClick={() => navigate('/projects?status=BLOCKED')} />
-        <KpiCard label="On Hold" value={data.kpis?.onHold} tone="warn" onClick={() => navigate('/projects?status=ON_HOLD')} />
-        <KpiCard label="Completed" value={data.kpis?.completed} tone="ok" onClick={() => navigate('/projects?status=COMPLETED')} />
+        <KpiCard label="On Track" value={count('green')} tone="ok" onClick={() => navigate('/projects')} />
+        <KpiCard label="Attention Required" value={count('orange')} tone="warn" onClick={() => navigate('/projects')} />
+        <KpiCard label="Delayed / Critical" value={count('red')} tone="danger" onClick={() => navigate('/projects?delayed=true')} />
+        <KpiCard label="On Hold" value={count('yellow')} tone="warn" onClick={() => navigate('/projects?status=ON_HOLD')} />
       </div>
-      <div className="grid-2">
-        <div className="card">
-          <h3>Health mix</h3>
-          <DonutChart items={health} />
+      {!rows.length && (
+        <div className="empty">
+          No projects available. <Link to="/leads">Convert Lead to Project</Link>
         </div>
-        <div className="card">
-          <h3>Department-wise health</h3>
-          {(data.departmentWorkload || []).map((d) => (
-            <div className="bar-row" key={d.name}>
-              <span>{d.name}</span>
-              <div className="track"><i style={{ width: `${Math.min(100, ((d.overdue + d.blocked + d.pending) / Math.max(1, d.active + d.completed)) * 100)}%` }} /></div>
-              <strong>{d.overdue} ov · {d.blocked} blk</strong>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="grid-2" style={{ marginTop: 14 }}>
-        <div className="card">
-          <h3>Overdue tasks</h3>
-          <DataTable
-            rows={data.overdueActivities || []}
-            empty="No overdue tasks."
-            columns={[
-              { key: 'name', label: 'Task' },
-              { key: 'project', label: 'Project', render: (r) => r.project?.projectId || r.projectId },
-              { key: 'dueDate', label: 'Due', render: (r) => fmtDate(r.dueDate) },
-              { key: 'status', label: 'Status', render: (r) => <StatusBadge code={r.statusCode || 'OVERDUE'} /> },
-            ]}
-          />
-        </div>
-        <div className="card">
-          <h3>Upcoming deadlines</h3>
-          <DataTable
-            rows={data.upcomingDeadlines || []}
-            empty="No upcoming deadlines."
-            columns={[
-              { key: 'name', label: 'Item' },
-              { key: 'project', label: 'Project', render: (r) => r.project?.projectId || r.projectId },
-              { key: 'dueDate', label: 'Due', render: (r) => fmtDate(r.dueDate || r.expectedCompletion) },
-            ]}
-          />
-        </div>
-      </div>
-      <div className="card" style={{ marginTop: 14 }}>
-        <h3>Critical projects</h3>
+      )}
+      {rows.length > 0 && (
         <DataTable
-          rows={data.critical || []}
-          empty="No critical projects."
+          rows={rows}
           columns={[
-            { key: 'projectId', label: 'Project', render: (r) => <button className="linkish" type="button" onClick={() => navigate(`/projects/${r.id}`)}>{r.projectId}</button> },
-            { key: 'customer', label: 'Customer', render: (r) => r.customer?.companyName || r.customer },
-            { key: 'stage', label: 'Stage', render: (r) => labelOf(lookups, 'PROJECT_STAGE', r.stage || r.currentStageCode) },
-            { key: 'health', label: 'Health', render: (r) => <StatusBadge code={r.health || r.currentStatusCode} /> },
-            { key: 'due', label: 'Expected', render: (r) => fmtDate(r.expectedCompletion) },
+            { key: 'project', label: 'Project Name', render: (r) => <button type="button" className="linkish" onClick={() => navigate(`/projects/${r.id}`)}>{r.projectId} · {r.name}</button> },
+            { key: 'customer', label: 'Customer' },
+            { key: 'progress', label: 'Overall Progress', render: (r) => `${r.progress ?? 0}%` },
+            { key: 'schedule', label: 'Schedule Health', render: (r) => <HealthPill item={r.schedule} /> },
+            { key: 'tasks', label: 'Task Health', render: (r) => <HealthPill item={r.tasks} /> },
+            { key: 'issues', label: 'Issue Health', render: (r) => <HealthPill item={r.issues} /> },
+            { key: 'approvals', label: 'Approval Health', render: (r) => <HealthPill item={r.approvals} /> },
+            { key: 'overall', label: 'Overall Project Health', render: (r) => <HealthPill item={r.overall} /> },
           ]}
         />
-      </div>
+      )}
     </div>
   );
 }

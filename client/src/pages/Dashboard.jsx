@@ -150,9 +150,20 @@ export default function Dashboard() {
             <KpiCard label="Won" value={sales.kpis.won} tone="ok" onClick={() => navigate('/leads?status=WON')} />
             <KpiCard label="Lost" value={sales.kpis.lost} onClick={() => navigate('/leads?status=LOST')} />
           </div>
+          {sales.customerFollowUps && (
+            <>
+              <h3 style={{ marginTop: 22 }}>Customer Follow-ups</h3>
+              <div className="kpi-grid">
+                <KpiCard label="Due Today" value={sales.customerFollowUps.dueToday} tone="warn" onClick={() => navigate('/customer-feedback?followUpStatus=DUE_TODAY')} />
+                <KpiCard label="Overdue" value={sales.customerFollowUps.overdue} tone="danger" onClick={() => navigate('/customer-feedback?followUpStatus=OVERDUE')} />
+                <KpiCard label="Awaiting Customer Response" value={sales.customerFollowUps.awaiting} onClick={() => navigate('/customer-feedback?finalStatus=AWAITING_CUSTOMER_RESPONSE')} />
+                <KpiCard label="Feedback Received" value={sales.customerFollowUps.received} tone="ok" onClick={() => navigate('/customer-feedback?feedbackStatus=RECEIVED')} />
+              </div>
+            </>
+          )}
           <h3 style={{ marginTop: 22 }}>Output Submission</h3>
           <div className="kpi-grid">
-            <KpiCard label="On Time" value={sales.kpis.outputOnTime} tone="ok" onClick={() => navigate('/leads?outputStatus=ON_TIME')} />
+            <KpiCard label="In Progress" value={sales.kpis.outputOnTime} tone="ok" onClick={() => navigate('/leads?outputStatus=ON_TIME')} />
             <KpiCard label="Overdue" value={sales.kpis.outputOverdue} tone="danger" onClick={() => navigate('/leads?outputStatus=OVERDUE')} />
             <KpiCard label="Delayed 1–3 Days" value={sales.kpis.outputDelayed13} tone="warn" onClick={() => navigate('/leads?outputStatus=DELAYED_1_3')} />
             <KpiCard label="Delayed >3 Days" value={sales.kpis.outputDelayedOver3} onClick={() => navigate('/leads?outputStatus=DELAYED_OVER_3')} />

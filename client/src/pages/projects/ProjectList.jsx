@@ -14,7 +14,9 @@ export default function ProjectList() {
   const q = Object.fromEntries(params.entries());
 
   useEffect(() => {
-    api.get(`/projects?${params.toString()}`).then(setData).catch(() => setData({ items: [] }));
+    const query = new URLSearchParams(params);
+    if (!query.get('pageSize')) query.set('pageSize', '100');
+    api.get(`/projects?${query.toString()}`).then(setData).catch(() => setData({ items: [] }));
   }, [params]);
 
   function set(key, value) {
@@ -27,9 +29,9 @@ export default function ProjectList() {
     <div>
       <div className="page-head">
         <div>
-          <p className="eyebrow">Project Execution</p>
+          <p className="eyebrow">Executive</p>
           <h2>Projects</h2>
-          <p>Confirmed orders in execution</p>
+          <p>Projects linked from existing leads</p>
         </div>
       </div>
       <div className="chips" style={{ marginBottom: 12 }}>
@@ -79,16 +81,18 @@ export default function ProjectList() {
       </div>
       <DataTable
         rows={data.items}
+        empty={<span>No projects available. <Link to="/leads">Convert Lead to Project</Link></span>}
         columns={[
           { key: 'projectId', label: 'Project ID', render: (r) => <Link to={`/projects/${r.id}`}>{r.projectId}</Link> },
           { key: 'name', label: 'Project Name' },
-          { key: 'customer', label: 'Customer', render: (r) => r.customer?.companyName },
-          { key: 'stage', label: 'Stage', render: (r) => labelOf(lookups, 'PROJECT_STAGE', r.currentStageCode) },
-          { key: 'status', label: 'Status', render: (r) => <StatusBadge code={r.currentStatusCode} label={labelOf(lookups, 'PROJECT_STATUS', r.currentStatusCode)} /> },
+          { key: 'customer', label: 'Customer', render: (r) => r.customer?.companyName || '—' },
+          { key: 'sales', label: 'Sales Person', render: (r) => r.salesPerson?.fullName || '—' },
+          { key: 'product', label: 'Product Group', render: (r) => r.productGroup || r.productCategory || '—' },
+          { key: 'location', label: 'Location', render: (r) => r.location || r.site?.address || '—' },
+          { key: 'status', label: 'Status', render: (r) => <StatusBadge code={r.currentStatusCode} label={r.statusLabel || labelOf(lookups, 'PROJECT_STATUS', r.currentStatusCode)} /> },
+          { key: 'start', label: 'Start Date', render: (r) => fmtDate(r.startDate) },
+          { key: 'deadline', label: 'Deadline', render: (r) => fmtDate(r.expectedCompletion) },
           { key: 'progress', label: 'Progress', render: (r) => <ProgressBar value={r.progressPercent} /> },
-          { key: 'pm', label: 'Project Manager', render: (r) => r.projectManager?.fullName || '—' },
-          { key: 'ecd', label: 'Expected Completion', render: (r) => fmtDate(r.expectedCompletion) },
-          { key: 'delay', label: 'Delay', render: (r) => r.delayDays ? `${r.delayDays} days` : '—' },
         ]}
       />
     </div>

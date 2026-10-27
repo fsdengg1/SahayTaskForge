@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { prisma } = require('../prisma');
-const { AppError } = require('../utils/errors');
+const { AppError, mapPrismaError } = require('../utils/errors');
 
 async function authenticate(req, res, next) {
   try {
@@ -39,7 +39,7 @@ async function authenticate(req, res, next) {
     };
     next();
   } catch (err) {
-    next(err);
+    next(mapPrismaError(err) || err);
   }
 }
 

@@ -226,6 +226,9 @@ async function sales() {
     pipeline: statuses.map((s) => ({ code: s.statusCode, count: s._count })),
     sources: sources.map((s) => ({ code: s.sourceCode, count: s._count })),
     salespersons: owners.map((o) => ({ id: o.salesPersonId, name: userMap[o.salesPersonId] || 'Unassigned', count: o._count })),
+    customerFollowUps: await require('./customerFeedbackService').kpis().catch(() => ({
+      total: 0, pending: 0, received: 0, followUpRequired: 0, dueToday: 0, overdue: 0, awaiting: 0,
+    })),
   };
 }
 

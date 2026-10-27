@@ -444,8 +444,36 @@ async function executive(query = {}, user = {}) {
     orderBy: { fullName: 'asc' },
   });
 
+  let liveOverview = null;
+  try {
+    liveOverview = await require('./liveProjectStore').overview();
+  } catch (error) {
+    console.error(error);
+  }
+  if (liveOverview) {
+    kpis.totalProjects = liveOverview.projectKpis.total;
+    kpis.activeProjects = liveOverview.projectKpis.active;
+    kpis.completed = liveOverview.projectKpis.completed;
+    kpis.delayed = liveOverview.projectKpis.delayed;
+    kpis.onHold = liveOverview.projectKpis.onHold;
+    kpis.onTrack = liveOverview.projectKpis.onTrack;
+    kpis.totalLeads = liveOverview.leadKpis.total;
+    kpis.activeLeads = liveOverview.leadKpis.active;
+    kpis.completedLeads = liveOverview.leadKpis.completed;
+    kpis.liveLeads = liveOverview.leadKpis.live;
+    kpis.pendingLeads = liveOverview.leadKpis.pending;
+    kpis.delayedLeads = liveOverview.leadKpis.delayed;
+    kpis.leadOnHold = liveOverview.leadKpis.onHold;
+  }
+
   return {
     kpis,
+    leadKpis: liveOverview?.leadKpis || null,
+    projectKpis: liveOverview?.projectKpis || null,
+    leadsByStatus: liveOverview?.leadsByStatus || [],
+    projectsByStatus: liveOverview?.projectsByStatus || [],
+    projectsByDepartment: liveOverview?.projectsByDepartment || [],
+    projectHealthRows: liveOverview?.healthRows || [],
     values,
     pipeline,
     projectHealth,
@@ -454,7 +482,7 @@ async function executive(query = {}, user = {}) {
     matrix: (query.status ? withHealth : withHealth.filter((p) => p.status !== 'COMPLETED')).slice(0, 25),
     timeline: query.status ? withHealth : withHealth.filter((p) => p.status !== 'COMPLETED'),
     critical,
-    upcomingDeadlines: upcoming,
+    upcomingDeadlines: liveOverview?.upcomingDeadlines?.length ? liveOverview.upcomingDeadlines : upcoming,
     overdueActivities: overdueAll.slice(0, 20).map((t) => ({
       id: t.id,
       taskId: t.taskId,
@@ -483,6 +511,9 @@ async function executive(query = {}, user = {}) {
     cft: isCft || roleCodes.includes('ADMIN') || roleCodes.includes('CEO') ? cft : [],
     engineering,
     attentionIssues: await require('./issueService').attentionIssues(),
+    customerFollowUps: await require('./customerFeedbackService').kpis().catch(() => ({
+      total: 0, pending: 0, received: 0, followUpRequired: 0, dueToday: 0, overdue: 0, awaiting: 0,
+    })),
     filters: { customers, managers, salesPeople },
     generatedAt: now,
   };

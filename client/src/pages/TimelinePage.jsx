@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { useLookups } from '../hooks/useLookups';
 import { fmtDate, labelOf } from '../utils/format';
@@ -25,7 +25,7 @@ export default function TimelinePage() {
     api.get(`/projects?${q.toString()}`).then((d) => {
       const items = d.items || [];
       if (!filters.department) return setRows(items);
-      setRows(items.filter((p) => String(p.currentStageCode || '').includes(filters.department) || String(p.currentStageCode || '') === filters.department));
+      setRows(items.filter((p) => p.department === filters.department || String(p.currentStageCode || '').includes(filters.department)));
     }).catch(() => setRows([]));
   }, [filters]);
 
@@ -37,8 +37,9 @@ export default function TimelinePage() {
     <div>
       <div className="page-head">
         <div>
+          <p className="eyebrow">Executive</p>
           <h2>Project Timeline</h2>
-          <p>Start, expected completion, stage and progress across the same project portfolio.</p>
+          <p>Start, deadline, status, progress and milestones from the current projects.</p>
         </div>
       </div>
       <div className="filters">
@@ -56,14 +57,13 @@ export default function TimelinePage() {
         </select>
         <select value={filters.department} onChange={(e) => set('department', e.target.value)}>
           <option value="">All departments</option>
-          <option value="DESIGN">Design</option>
-          <option value="PROCUREMENT">Procurement</option>
-          <option value="PRODUCTION">Production</option>
-          <option value="QUALITY">Quality</option>
-          <option value="DISPATCH">Logistics</option>
-          <option value="INSTALL">Installation</option>
-          <option value="HANDOVER">Handover</option>
-          <option value="INVOICE">Finance</option>
+          <option value="Sales">Sales</option>
+          <option value="Design & Engineering">Design & Engineering</option>
+          <option value="Procurement">Procurement</option>
+          <option value="Production">Production</option>
+          <option value="Quality">Quality</option>
+          <option value="Installation">Installation</option>
+          <option value="Logistics">Logistics</option>
         </select>
         <select value={filters.stage} onChange={(e) => set('stage', e.target.value)}>
           <option value="">All stages</option>
@@ -77,24 +77,40 @@ export default function TimelinePage() {
         <input type="date" value={filters.to} onChange={(e) => set('to', e.target.value)} />
       </div>
       <div className="card">
-        {rows.map((p) => (
-          <div className="gantt-row" key={p.id} onClick={() => navigate(`/projects/${p.id}`)}>
-            <div style={{ minWidth: 160 }}>
-              <strong>{p.projectId}</strong>
-              <p>{p.customer?.companyName}</p>
+        {rows.map((p) => {
+          const tone = p.overall?.tone || (p.delayed ? 'red' : p.onHold ? 'yellow' : 'green');
+          const track = tone === 'red' ? 'var(--danger)' : tone === 'yellow' ? 'var(--warning)' : tone === 'orange' ? 'var(--accent)' : 'var(--success)';
+          return (
+            <div className={`gantt-row health-${tone}`} key={p.id} onClick={() => navigate(`/projects/${p.id}`)}>
+              <div style={{ minWidth: 180 }}>
+                <strong>{p.projectId}</strong>
+                <p>{p.name}</p>
+                <p>{p.customer?.companyName}</p>
+              </div>
+              <div className="gantt-track">
+                <i style={{ width: `${Math.max(p.progressPercent ? 8 : 0, p.progressPercent || 0)}%`, background: track }} />
+              </div>
+              <div style={{ minWidth: 240 }}>
+                <StatusBadge code={p.overall?.code || p.currentStatusCode} label={p.overall?.label || p.statusLabel || labelOf(lookups, 'PROJECT_STATUS', p.currentStatusCode)} />
+                <p>{p.stageLabel || labelOf(lookups, 'PROJECT_STAGE', p.currentStageCode)}</p>
+                <ProgressBar value={p.progressPercent} />
+                <small>{fmtDate(p.startDate)} → {fmtDate(p.expectedCompletion)}</small>
+                {(p.milestones || []).length > 0 && (
+                  <ul className="tl-milestones">
+                    {p.milestones.map((item) => (
+                      <li key={item.id}>{item.name} · {item.status || 'Open'} · {fmtDate(item.startDate)} – {fmtDate(item.endDate)}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
-            <div className="gantt-track">
-              <i style={{ width: `${Math.max(8, p.progressPercent || 0)}%`, background: p.delayDays ? 'var(--red)' : 'var(--steel)' }} />
-            </div>
-            <div style={{ minWidth: 220 }}>
-              <StatusBadge code={p.currentStatusCode} label={labelOf(lookups, 'PROJECT_STATUS', p.currentStatusCode)} />
-              <p>{labelOf(lookups, 'PROJECT_STAGE', p.currentStageCode)}</p>
-              <ProgressBar value={p.progressPercent} />
-              <small>{fmtDate(p.startDate)} → {fmtDate(p.expectedCompletion)}</small>
-            </div>
+          );
+        })}
+        {!rows.length && (
+          <div className="empty">
+            No projects available. <Link to="/leads">Convert Lead to Project</Link>
           </div>
-        ))}
-        {!rows.length && <div className="empty">No projects match these filters.</div>}
+        )}
       </div>
     </div>
   );

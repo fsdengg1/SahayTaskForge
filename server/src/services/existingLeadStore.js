@@ -1,10 +1,13 @@
 const crypto = require('crypto');
+const { Prisma } = require('@prisma/client');
 const { prisma } = require('../prisma');
 const { parsePagination, paginated } = require('../utils/pagination');
 const { AppError } = require('../utils/errors');
 const { logActivity, logAudit } = require('../utils/activity');
 const {
   calculateLeadSubmissionDeadline,
+  calendarDayKey,
+  submissionDeadlineForLeadDate,
   withDeadlineFields,
   calendarDelayDays,
   formatIstDateTime,
@@ -27,6 +30,8 @@ const OUTPUT_TO_CODE = {
   'Only Drawings': 'DRAWING',
   'Only BOM': 'BOM',
   'Drawings + BOM': 'BOM_DRAWINGS',
+  'BOM / Drawings': 'BOM_DRAWINGS',
+  'BOM/Drawings': 'BOM_DRAWINGS',
   DRAWING: 'DRAWING',
   BOM: 'BOM',
   BOM_DRAWINGS: 'BOM_DRAWINGS',
@@ -38,6 +43,17 @@ const CODE_TO_OUTPUT = {
   BOM_DRAWINGS: 'Drawings + BOM',
 };
 
+const PIPELINE_STATUSES = [
+  ['NEW', 'New', 'blue'],
+  ['COMPLETED', 'Completed', 'green'],
+  ['WAITING', 'Waiting', 'yellow'],
+  ['PENDING', 'Pending', 'yellow'],
+  ['FOLLOW_UP', 'Follow Up', 'yellow'],
+  ['SUBMITTED', 'Submitted', 'blue'],
+  ['APPROVED', 'Approved', 'green'],
+  ['ON_HOLD', 'On Hold', 'yellow'],
+];
+
 const OUTPUT_LABELS = {
   DRAWING: 'Only Drawings',
   BOM: 'Only BOM',
@@ -45,6 +61,8 @@ const OUTPUT_LABELS = {
   'Only Drawings': 'Only Drawings',
   'Only BOM': 'Only BOM',
   'Drawings + BOM': 'Drawings + BOM',
+  'BOM / Drawings': 'Drawings + BOM',
+  'BOM/Drawings': 'Drawings + BOM',
 };
 
 function toDate(value) {
@@ -70,6 +88,97 @@ function asObject(value) {
     }
   }
   return typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function titleStatus(code) {
+  if (String(code || '').toUpperCase() === 'IN_PROGRESS') return 'LIVE';
+  return String(code || 'Unknown')
+    .toLowerCase()
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+const EXECUTION_STAGES = new Set([
+  'POST_DESIGN',
+  'DESIGN',
+  'DETAILED_DESIGN',
+  'DESIGN_APPROVAL',
+  'BOM_MRP',
+  'PROCUREMENT',
+  'MATERIAL_RECEIPT',
+  'PRODUCTION',
+  'PRODUCTION_QC',
+  'QUALITY',
+  'PACKING',
+  'DISPATCH',
+  'INSTALLATION',
+  'INSTALLATION_QC',
+  'SITE_READINESS',
+  'CUSTOMER_INSPECTION',
+  'HANDOVER',
+  'INVOICE_PAYMENT',
+  'PROJECT_CLOSURE',
+  'COMPLETED',
+]);
+
+function isPendingEnquiry(lead) {
+  if (!lead || lead.archived) return false;
+  if (['COMPLETED', 'WON', 'LOST'].includes(lead.statusCode)) return false;
+  const stage = String(lead.projectStage || '').toUpperCase();
+  if (stage && EXECUTION_STAGES.has(stage)) return false;
+  return true;
+}
+
+function isPendingLocation(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return true;
+  if (['-', '—', 'na', 'n/a', 'nil', 'none', 'null', 'pending', 'location pending', 'tbd', 'tba'].includes(text)) return true;
+  return text.includes('pending');
+}
+
+function locationFromRow(row) {
+  const raw = String(row.company_address || row.detail_company_address || '').trim();
+  const locationPending = isPendingLocation(raw);
+  return {
+    location: locationPending ? 'Location Pending' : raw,
+    locationPending,
+  };
+}
+
+function statusChoices(leads = []) {
+  const labels = new Map(PIPELINE_STATUSES.map(([code, label, tone]) => [code, { code, label, tone }]));
+  for (const lead of leads) {
+    if (lead.statusCode && !labels.has(lead.statusCode)) {
+      labels.set(lead.statusCode, { code: lead.statusCode, label: titleStatus(lead.statusCode), tone: 'grey' });
+    }
+  }
+  const order = PIPELINE_STATUSES.map(([code]) => code);
+  return [...labels.values()].sort((a, b) => {
+    const left = order.indexOf(a.code);
+    const right = order.indexOf(b.code);
+    return (left === -1 ? order.length : left) - (right === -1 ? order.length : right);
+  });
+}
+
+function productGroupChoices(leads = []) {
+  const names = new Set();
+  for (const lead of leads) {
+    const value = String(lead.productGroup || '').trim();
+    if (value) names.add(value);
+  }
+  return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+}
+
+function locationChoices(leads = []) {
+  const names = new Set();
+  let pending = false;
+  for (const lead of leads) {
+    if (lead.locationPending) pending = true;
+    else if (lead.location) names.add(lead.location);
+  }
+  const items = [...names].sort((a, b) => a.localeCompare(b)).map((name) => ({ code: name, label: name }));
+  if (pending) items.unshift({ code: '__pending', label: 'Location Pending' });
+  return items;
 }
 
 function isUuid(value) {
@@ -229,6 +338,28 @@ async function existingUserId(id) {
   return rows[0]?.id || null;
 }
 
+async function resolveOwnerId(salesPersonId) {
+  if (!salesPersonId) return null;
+  const direct = await existingUserId(salesPersonId);
+  if (direct) return direct;
+  try {
+    const appUser = await prisma.user.findUnique({
+      where: { id: salesPersonId },
+      select: { fullName: true },
+    });
+    const name = String(appUser?.fullName || '').trim();
+    if (name) {
+      const rows = await prisma.$queryRaw`
+        SELECT id FROM users WHERE full_name = ${name} LIMIT 1
+      `;
+      if (rows[0]?.id) return rows[0].id;
+    }
+  } catch {
+    /* fall through to a clear save error */
+  }
+  throw new AppError(400, 'Selected sales person could not be saved.', { field: 'salesPersonId' });
+}
+
 async function fetchLeadRows() {
   return prisma.$queryRaw`
     SELECT
@@ -249,7 +380,8 @@ async function fetchLeadRows() {
       d.company_address AS detail_company_address,
       d.industry AS detail_industry,
       d.designation AS detail_designation,
-      d.lead_date AS detail_lead_date
+      d.lead_date AS detail_lead_date,
+      (SELECT p.current_stage FROM projects p WHERE p.lead_id = l.id LIMIT 1) AS project_stage
     FROM leads l
     LEFT JOIN users u ON u.id = l.owner_id
     LEFT JOIN users submitter ON submitter.id = l.last_submitted_by
@@ -279,7 +411,8 @@ async function fetchLeadRow(id) {
       d.company_address AS detail_company_address,
       d.industry AS detail_industry,
       d.designation AS detail_designation,
-      d.lead_date AS detail_lead_date
+      d.lead_date AS detail_lead_date,
+      (SELECT p.current_stage FROM projects p WHERE p.lead_id = l.id LIMIT 1) AS project_stage
     FROM leads l
     LEFT JOIN users u ON u.id = l.owner_id
     LEFT JOIN users submitter ON submitter.id = l.last_submitted_by
@@ -297,7 +430,9 @@ function shapeLead(row, extras = {}) {
   const contactName = row.contact_person || row.detail_contact_person || null;
   const outputRequired = normalizeOutput(row.output_required);
   const createdAt = row.created_at;
-  const submissionDeadline = calculateLeadSubmissionDeadline(createdAt);
+  const submissionDeadline = row.submission_deadline
+    ? new Date(row.submission_deadline)
+    : calculateLeadSubmissionDeadline(createdAt);
   const hold = Boolean(details.outputOnHold);
   const shaped = withDeadlineFields({
     id: row.id,
@@ -349,8 +484,8 @@ function shapeLead(row, extras = {}) {
     },
     site: {
       id: null,
-      name: row.site_location || row.plant_location || row.location || null,
-      address: row.site_location || row.plant_location || row.location || null,
+      name: row.plant_location || row.site_location || null,
+      address: row.plant_location || row.site_location || null,
     },
     salesPerson: row.owner_id ? { id: row.owner_id, fullName: row.owner_name || 'Assigned owner', username: null } : null,
     outputCompletedBy: row.last_submitted_by ? { id: row.last_submitted_by, fullName: row.submitter_name || '—' } : null,
@@ -365,8 +500,16 @@ function shapeLead(row, extras = {}) {
     activity: extras.activity || [],
     title: row.title,
     product: row.product || row.product_1 || null,
+    plantLocation: row.plant_location || row.site_location || '',
+    companyAddress: row.company_address || row.detail_company_address || '',
+    customerType: row.customer_type || null,
+    projectStage: row.project_stage || null,
+    productGroup: row.product || row.product_1 || row.type_of_storage || details.storageMethod || details.materialToStore || null,
     sourceRaw: row.source || row.lead_source || null,
   });
+  const place = locationFromRow(row);
+  shaped.location = place.location;
+  shaped.locationPending = place.locationPending;
   shaped.outputRequiredLabel = outputLabel(row.output_required || outputRequired);
   return shaped;
 }
@@ -389,14 +532,32 @@ function matchesQuery(lead, query) {
       lead.salesPerson?.fullName,
       lead.title,
       lead.statusCode,
+      lead.location,
+      lead.productGroup,
+      lead.product,
     ].join(' ').toLowerCase();
     if (!hay.includes(q)) return false;
   }
+  if (query.view === 'pending' && !isPendingEnquiry(lead)) return false;
   if (query.status && lead.statusCode !== query.status) return false;
+  if (query.location === '__pending') {
+    if (!lead.locationPending) return false;
+  } else if (query.location && String(lead.location || '').toLowerCase() !== String(query.location).toLowerCase()) {
+    return false;
+  }
   if (query.priority && lead.priorityCode !== query.priority) return false;
-  if (query.salesPersonId && lead.salesPersonId !== query.salesPersonId) return false;
+  if (query.salesPersonId === 'unassigned') {
+    if (lead.salesPersonId) return false;
+  } else if (query.salesPersonId && lead.salesPersonId !== query.salesPersonId) return false;
   if (query.customerId && lead.customerId !== query.customerId && lead.customer?.id !== query.customerId) return false;
-  if (query.outputRequired && lead.outputRequired !== query.outputRequired && lead.outputRequiredLabel !== query.outputRequired) {
+  if (query.customerName) {
+    const wanted = String(query.customerName).trim().toLowerCase();
+    const name = String(lead.customer?.companyName || '').trim().toLowerCase();
+    if (name !== wanted) return false;
+  }
+  if (query.outputRequired === '__none') {
+    if (lead.outputRequired) return false;
+  } else if (query.outputRequired && lead.outputRequired !== query.outputRequired && lead.outputRequiredLabel !== query.outputRequired) {
     return false;
   }
   const outputStatus = query.outputStatus || query.deadlineStatus;
@@ -443,14 +604,27 @@ async function exists(id) {
   return Boolean(rows[0]);
 }
 
-async function listLeads(query) {
-  const { skip, take, page, pageSize } = parsePagination(query);
+async function matchingLeads(query = {}) {
   const rows = await fetchLeadRows();
-  const shaped = sortLeads(
+  return sortLeads(
     rows.map((row) => shapeLead(row)).filter((lead) => matchesQuery(lead, query)),
     query
   );
-  return paginated(shaped.slice(skip, skip + take), shaped.length, page, pageSize);
+}
+
+async function listLeads(query) {
+  const { skip, take, page, pageSize } = parsePagination(query);
+  const facetQuery = { ...query };
+  delete facetQuery.status;
+  delete facetQuery.location;
+  const all = await matchingLeads(facetQuery);
+  const shaped = all.filter((lead) => matchesQuery(lead, query));
+  return {
+    ...paginated(shaped.slice(skip, skip + take), shaped.length, page, pageSize),
+    statuses: statusChoices(all),
+    locations: locationChoices(all),
+    productGroups: productGroupChoices(all),
+  };
 }
 
 async function getLead(id) {
@@ -470,7 +644,7 @@ async function getLead(id) {
       ORDER BY f.followup_at DESC
     `,
     prisma.$queryRaw`
-      SELECT id, project_code, name, status, current_stage
+      SELECT id, project_code, name, status, current_stage, po_number, po_date, currency, currency_value
       FROM projects WHERE lead_id = ${id}::uuid
     `,
     prisma.$queryRaw`
@@ -533,6 +707,10 @@ async function getLead(id) {
       projectId: project.project_code,
       name: project.name,
       currentStatusCode: project.status || project.current_stage,
+      poNumber: project.po_number || null,
+      poDate: project.po_date || null,
+      currency: project.currency || 'INR',
+      currencyValue: project.currency_value == null ? null : Number(project.currency_value),
     })),
     activity,
   });
@@ -553,19 +731,20 @@ async function createLead(data, user) {
   const leadCode = await nextLeadCode();
   const companyName = data.companyName || data.title;
   const createdAt = new Date();
+  const submissionDeadline = submissionDeadlineForLeadDate(data.leadDate || createdAt, createdAt);
   const details = mergeDetails({}, data);
   const checklist = Array.isArray(data.checklist) && data.checklist.length
     ? checklistObject(data.checklist)
     : checklistObject(CHECKLIST_ITEMS.map(([itemCode, jsonKey, label]) => ({ itemCode, jsonKey, label, completed: false })));
-  const ownerId = await existingUserId(data.salesPersonId);
+  const ownerId = await resolveOwnerId(data.salesPersonId);
   const createdBy = await existingUserId(user?.id);
 
   await prisma.$executeRaw`
     INSERT INTO leads (
       id, lead_code, title, status, details, checklist, is_archived,
       company_name, industry, contact_person, designation, mobile, contact_email,
-      company_address, site_location, lead_date, priority, output_required,
-      notes, owner_id, created_by, created_at, updated_at, currency
+      company_address, site_location, lead_date, priority, output_required, product,
+      notes, owner_id, created_by, created_at, updated_at, currency, submission_deadline
     ) VALUES (
       ${id}::uuid,
       ${leadCode},
@@ -585,14 +764,31 @@ async function createLead(data, user) {
       ${toDate(data.leadDate) || createdAt},
       ${data.priorityCode || 'MEDIUM'},
       ${dbOutputValue(data.outputRequired)},
+      ${data.productGroup || null},
       ${data.remarks || null},
       ${ownerId}::uuid,
       ${createdBy}::uuid,
       ${createdAt},
       ${createdAt},
-      ${data.budgetCurrency || 'INR'}
+      ${data.budgetCurrency || 'INR'},
+      ${submissionDeadline}
     )
   `;
+  await prisma.$executeRaw`
+    UPDATE leads SET workflow_status = 'NEW' WHERE id = ${id}::uuid AND workflow_status IS NULL
+  `;
+  try {
+    const lifecycle = require('./lifecycleService');
+    await lifecycle.record({
+      leadId: id,
+      action: 'Lead Created',
+      previousStatus: null,
+      newStatus: 'NEW',
+      user,
+    });
+  } catch (error) {
+    console.error('Lead was created, but the workflow event was not.', error);
+  }
 
   await prisma.$executeRaw`
     INSERT INTO lead_customer_details (
@@ -637,7 +833,7 @@ async function createLead(data, user) {
     action: 'LEAD_CREATED',
     entity: 'Lead',
     entityId: id,
-    description: `${formatIstDateTime(createdAt)} — ${user.fullName || 'User'} created ${leadCode}. Output Required: ${outputLabel(data.outputRequired)}. Submission Deadline: ${formatDeadlineDate(calculateLeadSubmissionDeadline(createdAt))}`,
+    description: `${formatIstDateTime(createdAt)} — ${user.fullName || 'User'} created ${leadCode}. Output Required: ${outputLabel(data.outputRequired)}. Submission Deadline: ${formatDeadlineDate(submissionDeadline)}`,
   });
 
   return getLead(id);
@@ -647,9 +843,20 @@ async function updateLead(id, data, user) {
   const row = await fetchLeadRow(id);
   if (!row) throw new AppError(404, 'Lead not found.');
   const details = mergeDetails(row.details, data);
-  const ownerId = data.salesPersonId ? await existingUserId(data.salesPersonId) : row.owner_id;
+  const ownerId = data.salesPersonId === undefined
+    ? row.owner_id
+    : await resolveOwnerId(data.salesPersonId);
   const checklist = Array.isArray(data.checklist) ? checklistObject(data.checklist) : asObject(row.checklist);
   const companyName = data.companyName !== undefined ? data.companyName : row.company_name;
+  const restart = data.restartTracking === true || data.restartTracking === 'true';
+  const restartedAt = restart
+    ? (data.createdAt && !Number.isNaN(new Date(data.createdAt).getTime()) ? new Date(data.createdAt) : new Date())
+    : null;
+  const leadDateChanged = !restart && data.leadDate !== undefined && calendarDayKey(data.leadDate) !== calendarDayKey(row.lead_date);
+  const submissionDeadline = restart
+    ? calculateLeadSubmissionDeadline(restartedAt)
+    : (leadDateChanged ? submissionDeadlineForLeadDate(data.leadDate) : (row.submission_deadline || null));
+  const createdAtValue = restart ? restartedAt : row.created_at;
 
   await prisma.$executeRaw`
     UPDATE leads SET
@@ -666,10 +873,15 @@ async function updateLead(id, data, user) {
       priority = ${data.priorityCode !== undefined ? data.priorityCode : row.priority},
       status = ${data.statusCode !== undefined ? data.statusCode : row.status},
       output_required = ${data.outputRequired !== undefined ? dbOutputValue(data.outputRequired) : row.output_required},
+      product = ${data.productGroup !== undefined ? (data.productGroup || null) : row.product},
       notes = ${data.remarks !== undefined ? data.remarks : row.notes},
       owner_id = ${ownerId}::uuid,
       details = ${JSON.stringify(details)}::jsonb,
       checklist = ${JSON.stringify(checklist)}::jsonb,
+      submission_deadline = ${submissionDeadline},
+      created_at = ${createdAtValue},
+      submitted_at = ${restart ? null : row.submitted_at},
+      last_submitted_by = ${restart ? null : row.last_submitted_by}::uuid,
       updated_at = ${new Date()}
     WHERE id = ${id}::uuid
   `;
@@ -936,9 +1148,140 @@ async function addDocument(leadId, file, categoryCode, userId) {
   };
 }
 
+function parseCurrencyValue(value) {
+  if (value == null || value === '') return null;
+  const amount = Number(String(value).replace(/,/g, ''));
+  if (!Number.isFinite(amount) || amount < 0) throw new AppError(400, 'Enter a valid currency value.');
+  return amount;
+}
+
+function parsePoDate(value) {
+  if (!value) return null;
+  const day = String(value).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new AppError(400, 'Enter a valid PO date.');
+  return new Date(`${day}T00:00:00.000Z`);
+}
+
+function uuidOrNull(id) {
+  if (!id || !/^[0-9a-f-]{36}$/i.test(String(id))) return Prisma.sql`NULL`;
+  return Prisma.sql`CAST(${String(id)} AS uuid)`;
+}
+
+async function idInTable(table, id) {
+  if (!id || !/^[0-9a-f-]{36}$/i.test(String(id))) return null;
+  const rows = table === 'users'
+    ? await prisma.$queryRaw`SELECT id::text AS id FROM users WHERE id = CAST(${String(id)} AS uuid) LIMIT 1`
+    : await prisma.$queryRaw`SELECT id::text AS id FROM customers WHERE id = CAST(${String(id)} AS uuid) LIMIT 1`;
+  return rows[0]?.id || null;
+}
+
+async function nextProjectCode() {
+  const year = new Date().getFullYear();
+  const prefix = `PRJ-${year}-`;
+  const rows = await prisma.$queryRaw`
+    SELECT project_code FROM projects
+    WHERE project_code LIKE ${`${prefix}%`}
+    ORDER BY project_code DESC
+    LIMIT 1
+  `;
+  const last = rows[0]?.project_code ? Number(String(rows[0].project_code).split('-').pop()) : 0;
+  const next = Number.isFinite(last) ? last + 1 : 1;
+  return `${prefix}${String(next).padStart(4, '0')}`;
+}
+
+async function convertLeadToProject(leadId, data, user) {
+  const lead = await getLead(leadId);
+  if (lead.statusCode !== 'WON') {
+    throw new AppError(400, 'A lead can be converted only after status is Won.');
+  }
+  const name = String(data.name || '').trim() || lead.customer?.companyName || lead.leadId;
+  const poNumber = String(data.poNumber || '').trim() || null;
+  const poDate = parsePoDate(data.poDate);
+  const currencyValue = parseCurrencyValue(data.currencyValue ?? data.orderValue);
+  const currency = String(data.currency || lead.budgetCurrency || 'INR').trim().slice(0, 8) || 'INR';
+  const now = new Date();
+  const linked = lead.projects?.[0];
+
+  if (linked && !data.allowAdditional) {
+    await prisma.$executeRaw`
+      UPDATE projects
+      SET name = ${name},
+          po_number = ${poNumber},
+          po_date = ${poDate},
+          currency_value = ${currencyValue},
+          currency = ${currency},
+          updated_at = ${now}
+      WHERE id = CAST(${String(linked.id)} AS uuid)
+    `;
+    return {
+      id: linked.id,
+      projectId: linked.projectId,
+      name,
+      currencyValue,
+      currency,
+      poNumber,
+      poDate,
+    };
+  }
+
+  const ownerId = await idInTable('users', lead.salesPersonId) || await idInTable('users', user?.id);
+  const customerId = await idInTable('customers', lead.customerId);
+  const createdBy = await idInTable('users', user?.id) || ownerId;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const projectCode = await nextProjectCode();
+    try {
+      const rows = await prisma.$queryRaw`
+        INSERT INTO projects (
+          project_code, lead_id, customer_id, name, current_stage, status,
+          owner_id, start_date, created_by, priority, po_number, po_date,
+          currency_value, currency, created_at, updated_at
+        ) VALUES (
+          ${projectCode},
+          CAST(${String(lead.id)} AS uuid),
+          ${uuidOrNull(customerId)},
+          ${name},
+          'SALES',
+          'OPEN',
+          ${uuidOrNull(ownerId)},
+          ${now},
+          ${uuidOrNull(createdBy)},
+          ${lead.priorityCode || 'MEDIUM'},
+          ${poNumber},
+          ${poDate},
+          ${currencyValue},
+          ${currency},
+          ${now},
+          ${now}
+        )
+        RETURNING id::text AS id, project_code
+      `;
+      return {
+        id: rows[0].id,
+        projectId: rows[0].project_code,
+        name,
+        currencyValue,
+        currency,
+        poNumber,
+        poDate,
+      };
+    } catch (error) {
+      const message = `${error?.message || ''} ${error?.meta?.message || ''}`;
+      if (message.includes('23505') || message.includes('project_code')) continue;
+      throw error;
+    }
+  }
+  throw new AppError(409, 'Could not assign a project id. Try again.');
+}
+
 module.exports = {
   exists,
+  convertLeadToProject,
+  matchingLeads,
   listLeads,
+  isPendingEnquiry,
+  PIPELINE_STATUSES,
+  statusChoices,
+  locationChoices,
   getLead,
   createLead,
   updateLead,

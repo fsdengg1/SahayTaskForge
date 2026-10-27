@@ -103,6 +103,9 @@ model User {
   checklistCompletions    LeadChecklistItem[]
   installationVisits      InstallationVisit[]
   handovers               Handover[]             @relation("HandoverSahayRep")
+  assignedCustomerFeedback CustomerFeedback[]    @relation("FeedbackOwner")
+  createdCustomerFeedback  CustomerFeedback[]    @relation("FeedbackCreator")
+  customerFeedbackEvents   CustomerFeedbackEvent[]
 }
 
 model UserRole {
@@ -302,6 +305,53 @@ model Lead {
   @@index([priorityCode])
   @@index([submissionDeadline])
   @@index([outputRequired])
+}
+
+model CustomerFeedback {
+  id                   String    @id @default(uuid())
+  leadId               String    @unique @db.Uuid
+  location             String?
+  layoutSentDate       DateTime?
+  quotationSentDate    DateTime?
+  drawingQuoteStatus   String?
+  feedbackStatus       String    @default("PENDING")
+  customerFeedback     String?
+  feedbackDate         DateTime?
+  pendingRequirement   String?
+  nextAction           String?
+  responsiblePersonId  String?
+  nextFollowUpDate     DateTime?
+  finalStatus          String    @default("FOLLOW_UP_REQUIRED")
+  remarks              String?
+  createdById          String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  lead               StfLead                 @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  responsiblePerson  User?                   @relation("FeedbackOwner", fields: [responsiblePersonId], references: [id])
+  createdBy          User?                   @relation("FeedbackCreator", fields: [createdById], references: [id])
+  events             CustomerFeedbackEvent[]
+
+  @@index([feedbackStatus])
+  @@index([finalStatus])
+  @@index([responsiblePersonId])
+  @@index([nextFollowUpDate])
+}
+
+model CustomerFeedbackEvent {
+  id                 String   @id @default(uuid())
+  feedbackId         String
+  action             String
+  customerFeedback   String?
+  nextAction         String?
+  remarks            String?
+  userId             String?
+  createdAt          DateTime @default(now())
+
+  feedback CustomerFeedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  user     User?            @relation(fields: [userId], references: [id])
+
+  @@index([feedbackId, createdAt])
 }
 
 model LeadRequirement {
@@ -1148,6 +1198,7 @@ model StfLead {
   outputRequired     String?   @map("output_required")
   basicValue         Decimal?  @map("basic_value") @db.Decimal
   typeOfStorage      String?   @map("type_of_storage")
+  customerFeedbacks  CustomerFeedback[]
 
   @@map("leads")
 }

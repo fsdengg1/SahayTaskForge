@@ -101,6 +101,24 @@ function dayKey(value) {
   });
 }
 
+function CountCard({ title, items, empty, onSelect }) {
+  const rows = items || [];
+  const max = Math.max(1, ...rows.map((item) => item.count || 0));
+  return (
+    <div className="card exec-card">
+      <h3>{title}</h3>
+      {!rows.length && <div className="exec-empty muted">{empty}</div>}
+      {rows.map((item) => (
+        <button type="button" className="bar-row exec-count" key={item.code || item.label} onClick={() => onSelect(item)}>
+          <span>{item.label}</span>
+          <div className="track"><i style={{ width: `${Math.max(6, (item.count / max) * 100)}%` }} /></div>
+          <strong>{item.count}</strong>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function deptProgress(dept) {
   const work = (dept.completed || 0) + (dept.pending || 0) + (dept.inProgress || 0) + (dept.blocked || 0);
   return work ? Math.round(((dept.completed || 0) / work) * 100) : 0;
@@ -190,14 +208,21 @@ export default function ExecutiveDashboard() {
     return groups;
   }, []);
 
-  const kpiCards = [
-    { key: 'total', label: 'Total Projects', value: kpis.totalProjects, hint: 'Portfolio', onClick: () => navigate('/projects') },
-    { key: 'active', label: 'Active', value: kpis.activeProjects, hint: 'In execution', onClick: () => navigate('/projects') },
-    { key: 'onTrack', label: 'On Track', value: kpis.onTrack, tone: 'ok', hint: kpis.onTrack ? 'Healthy' : 'None', onClick: () => navigate('/projects?status=ON_TRACK') },
-    { key: 'delayed', label: 'Delayed', value: kpis.delayed, tone: 'danger', hint: kpis.delayed ? 'Needs attention' : 'None', onClick: () => navigate('/projects?delayed=true') },
-    { key: 'blocked', label: 'Blocked', value: kpis.blocked, tone: 'danger', hint: kpis.blocked ? 'Needs attention' : 'None', onClick: () => navigate('/projects?status=BLOCKED') },
-    { key: 'onHold', label: 'On Hold', value: kpis.onHold, tone: 'warn', hint: kpis.onHold ? 'Paused' : 'None', onClick: () => navigate('/projects?status=ON_HOLD') },
-    { key: 'completed', label: 'Completed', value: kpis.completed, tone: 'ok', hint: 'Closed', onClick: () => navigate('/projects?status=COMPLETED') },
+  const leadCards = [
+    { key: 'totalLeads', label: 'Total Leads', value: kpis.totalLeads, hint: 'Lead records', onClick: () => navigate('/leads') },
+    { key: 'activeLeads', label: 'Active Leads', value: kpis.activeLeads, hint: 'Not completed', onClick: () => navigate('/leads') },
+    { key: 'completedLeads', label: 'Completed Leads', value: kpis.completedLeads, tone: 'ok', hint: 'Status completed', onClick: () => navigate('/leads?status=COMPLETED') },
+    { key: 'liveLeads', label: 'Live / In Progress', value: kpis.liveLeads, hint: 'Status in progress', onClick: () => navigate('/leads?status=IN_PROGRESS') },
+    { key: 'pendingLeads', label: 'Pending / Follow-up', value: kpis.pendingLeads, tone: 'warn', hint: 'Pending or follow-up', onClick: () => navigate('/lead-dashboard?scope=pending') },
+    { key: 'delayedLeads', label: 'Delayed', value: kpis.delayedLeads, tone: 'danger', hint: 'Deadline or follow-up has passed', onClick: () => navigate('/lead-dashboard?scope=delayed') },
+    { key: 'leadOnHold', label: 'On Hold', value: kpis.leadOnHold, tone: 'warn', hint: 'Status on hold', onClick: () => navigate('/leads?status=ON_HOLD') },
+  ];
+  const projectCards = [
+    { key: 'total', label: 'Total Projects', value: kpis.totalProjects, hint: 'Converted from leads', onClick: () => navigate('/projects') },
+    { key: 'active', label: 'Active Projects', value: kpis.activeProjects, hint: 'Still open', onClick: () => navigate('/projects?bucket=active') },
+    { key: 'completedProjects', label: 'Completed Projects', value: kpis.completed, tone: 'ok', hint: 'Closed', onClick: () => navigate('/projects?status=COMPLETED') },
+    { key: 'delayed', label: 'Delayed Projects', value: kpis.delayed, tone: 'danger', hint: kpis.delayed ? 'Past deadline' : 'None past deadline', onClick: () => navigate('/projects?delayed=true') },
+    { key: 'onHold', label: 'Projects On Hold', value: kpis.onHold, tone: 'warn', hint: kpis.onHold ? 'Paused' : 'None on hold', onClick: () => navigate('/projects?status=ON_HOLD') },
   ];
 
   return (
@@ -267,14 +292,42 @@ export default function ExecutiveDashboard() {
         </div>
       </div>
 
-      <section className="exec-kpis-row">
-        {kpiCards.map((card) => (
+      <section className="exec-kpis-row exec-kpis-5">
+        {leadCards.map((card) => (
           <button key={card.key} type="button" className={`exec-kpi ${card.tone || ''}`} onClick={card.onClick}>
             <span>{card.label}</span>
             <strong>{card.value ?? 0}</strong>
             <em>{card.hint}</em>
           </button>
         ))}
+      </section>
+      <section className="exec-kpis-row exec-kpis-5">
+        {projectCards.map((card) => (
+          <button key={card.key} type="button" className={`exec-kpi ${card.tone || ''}`} onClick={card.onClick}>
+            <span>{card.label}</span>
+            <strong>{card.value ?? 0}</strong>
+            <em>{card.hint}</em>
+          </button>
+        ))}
+      </section>
+
+      <section className="exec-split">
+        <CountCard title="Leads by Status" items={data.leadsByStatus} empty="No leads available" onSelect={(item) => navigate(`/leads?status=${item.code}`)} />
+        <CountCard title="Projects by Status" items={data.projectsByStatus} empty="No projects available" onSelect={(item) => navigate(`/projects?status=${item.code}`)} />
+      </section>
+      <section className="exec-split">
+        <CountCard title="Projects by Department" items={data.projectsByDepartment} empty="No projects available" onSelect={() => navigate('/projects')} />
+        <div className="card exec-card">
+          <h3>Upcoming Deadlines</h3>
+          {!(data.upcomingDeadlines || []).length && <div className="exec-empty muted">No upcoming deadlines</div>}
+          {(data.upcomingDeadlines || []).slice(0, 8).map((item) => (
+            <button type="button" className="exec-deadline" key={item.id} onClick={() => navigate(item.href || '/projects')}>
+              <strong>{item.project?.projectId || item.detail}</strong>
+              <span>{item.name}</span>
+              <em>{fmtShort(item.dueDate)}</em>
+            </button>
+          ))}
+        </div>
       </section>
 
       {data.values && (
@@ -327,6 +380,26 @@ export default function ExecutiveDashboard() {
           {!healthTotal && <p className="exec-quiet">No projects in the current filter.</p>}
         </div>
       </section>
+
+      {data.customerFollowUps && (
+        <section className="card exec-card cf-dash" style={{ marginTop: 14 }}>
+          <h3>Customer Follow-ups</h3>
+          <div className="cf-dash-grid">
+            <button type="button" onClick={() => navigate('/customer-feedback?followUpStatus=DUE_TODAY')}>
+              <span>Due Today</span><strong>{data.customerFollowUps.dueToday || 0}</strong>
+            </button>
+            <button type="button" className="danger" onClick={() => navigate('/customer-feedback?followUpStatus=OVERDUE')}>
+              <span>Overdue</span><strong>{data.customerFollowUps.overdue || 0}</strong>
+            </button>
+            <button type="button" onClick={() => navigate('/customer-feedback?finalStatus=AWAITING_CUSTOMER_RESPONSE')}>
+              <span>Awaiting Customer Response</span><strong>{data.customerFollowUps.awaiting || 0}</strong>
+            </button>
+            <button type="button" className="ok" onClick={() => navigate('/customer-feedback?feedbackStatus=RECEIVED')}>
+              <span>Feedback Received</span><strong>{data.customerFollowUps.received || 0}</strong>
+            </button>
+          </div>
+        </section>
+      )}
 
       <section className="exec-attn">
         <div className="card exec-card">
@@ -422,7 +495,7 @@ export default function ExecutiveDashboard() {
                 {deadlines.slice(0, 8).map((d) => (
                   <tr
                     key={d.id}
-                    onClick={() => navigate(d.project?.id ? `/projects/${d.project.id}` : '/tasks')}
+                    onClick={() => navigate(d.href || (d.project?.id ? `/projects/${d.project.id}` : '/tasks'))}
                   >
                     <td className="exec-proj">{d.project?.projectId || '—'}</td>
                     <td>{d.name}</td>

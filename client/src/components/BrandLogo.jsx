@@ -1,10 +1,13 @@
 export default function BrandLogo({ variant = 'color', compact = false, alt = 'Sahay Racks' }) {
-  const src = variant === 'white' ? '/brand/logo-white.png' : '/brand/logo-color.jpg';
   return (
-    <img
-      src={src}
-      alt={alt}
-      className={`brand-logo is-${variant}${compact ? ' is-compact' : ''}`}
-    />
+    <span className={`brand-lockup is-${variant}${compact ? ' is-compact' : ''}`} role="img" aria-label={alt}>
+      <span className="brand-mark" aria-hidden="true">SR</span>
+      {!compact && (
+        <span className="brand-copy">
+          <strong>Sahay Racks</strong>
+          <span>Project Tracking</span>
+        </span>
+      )}
+    </span>
   );
 }

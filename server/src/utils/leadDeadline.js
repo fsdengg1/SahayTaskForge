@@ -3,7 +3,7 @@ const CREATION_CUTOFF_HOUR = 15;
 const DEADLINE_CUTOFF_HOUR = 18;
 
 const OUTPUT_LABELS = {
-  BOM_DRAWINGS: 'BOM / Drawings',
+  BOM_DRAWINGS: 'Drawings + BOM',
   BOM: 'BOM',
   DRAWING: 'Drawing',
 };
@@ -11,7 +11,7 @@ const OUTPUT_LABELS = {
 const STATUS_META = {
   COMPLETED: { label: 'COMPLETED', color: 'green' },
   ON_HOLD: { label: 'ON HOLD', color: 'yellow' },
-  ON_TIME: { label: 'ON TIME', color: 'green' },
+  ON_TIME: { label: 'IN PROGRESS', color: 'green' },
   OVERDUE: { label: 'OVERDUE', color: 'red' },
   DELAYED_1_3: { label: 'DELAYED 1–3 DAYS', color: 'brown' },
   DELAYED_OVER_3: { label: 'DELAYED >3 DAYS', color: 'black' },
@@ -82,6 +82,29 @@ function calculateLeadSubmissionDeadline(createdAt = new Date()) {
   const days = created.hour >= CREATION_CUTOFF_HOUR ? 4 : 3;
   const due = addCalendarDays(created.year, created.month, created.day, days);
   return utcDateFromParts(due.year, due.month, due.day);
+}
+
+function calendarDayKey(value) {
+  if (!value) return '';
+  const text = String(value).slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text) && String(value).length <= 10) return text;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  if (date.toISOString().endsWith('T00:00:00.000Z')) return date.toISOString().slice(0, 10);
+  const parts = kolkataParts(date);
+  return dateKey(parts.year, parts.month, parts.day);
+}
+
+function anchorForLeadDate(leadDate, now = new Date()) {
+  const day = calendarDayKey(leadDate);
+  if (!day) return now;
+  const [year, month, dayOfMonth] = day.split('-').map(Number);
+  const clock = kolkataParts(now);
+  return new Date(Date.UTC(year, month - 1, dayOfMonth, clock.hour, clock.minute, clock.second) - (5 * 60 + 30) * 60000);
+}
+
+function submissionDeadlineForLeadDate(leadDate, now = new Date()) {
+  return calculateLeadSubmissionDeadline(anchorForLeadDate(leadDate, now));
 }
 
 function delayedLabel(delayDays) {
@@ -288,6 +311,9 @@ function withDeadlineFields(lead, now = new Date()) {
 
 module.exports = {
   calculateLeadSubmissionDeadline,
+  calendarDayKey,
+  anchorForLeadDate,
+  submissionDeadlineForLeadDate,
   getOutputSubmissionStatus,
   deadlinePreview,
   withDeadlineFields,

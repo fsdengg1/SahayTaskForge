@@ -38,8 +38,35 @@ router.get(
 router.get(
   '/deadline-preview',
   authorize('leads.view'),
-  asyncHandler(async (_req, res) => {
-    res.json(leadService.getDeadlinePreview());
+  asyncHandler(async (req, res) => {
+    res.json(leadService.getDeadlinePreview(req.query));
+  })
+);
+
+router.get(
+  '/dashboard',
+  authorize('leads.view'),
+  asyncHandler(async (req, res) => {
+    const leadDashboard = require('../services/leadDashboardService');
+    res.json(await leadDashboard.getDashboard(req.query));
+  })
+);
+
+router.get(
+  '/sales-enquiry-dashboard',
+  authorize('leads.view'),
+  asyncHandler(async (req, res) => {
+    const salesEnquiry = require('../services/salesEnquiryDashboardService');
+    res.json(await salesEnquiry.getSalesEnquiryDashboard(req.query));
+  })
+);
+
+router.post(
+  '/:id/customer-feedback',
+  authorize('customer_feedback.create', 'customer_feedback.edit', 'leads.edit'),
+  asyncHandler(async (req, res) => {
+    const customerFeedback = require('../services/customerFeedbackService');
+    res.json(await customerFeedback.openForLead(req.params.id, req.user, req.body || {}));
   })
 );
 

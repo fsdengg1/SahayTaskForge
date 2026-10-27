@@ -29,7 +29,7 @@ async function listUsers(query) {
 }
 
 async function salesUsers() {
-  return prisma.user.findMany({
+  const roleUsers = await prisma.user.findMany({
     where: {
       active: true,
       roles: { some: { role: { code: { in: ['SALES_MANAGER', 'SALES_EXEC', 'SALES_COORD', 'ADMIN'] } } } },
@@ -37,6 +37,35 @@ async function salesUsers() {
     select: { id: true, fullName: true, username: true, email: true },
     orderBy: { fullName: 'asc' },
   });
+  let leadOwners = [];
+  try {
+    leadOwners = await prisma.$queryRaw`
+      SELECT DISTINCT u.id::text AS id, u.full_name AS "fullName"
+      FROM users u
+      WHERE u.full_name IS NOT NULL AND btrim(u.full_name) <> ''
+        AND EXISTS (SELECT 1 FROM leads l WHERE l.owner_id = u.id)
+      ORDER BY u.full_name ASC
+    `;
+  } catch {
+    leadOwners = [];
+  }
+  const people = new Map();
+  for (const user of leadOwners) {
+    const key = String(user.fullName || '').trim().toLowerCase();
+    if (!user?.id || !key) continue;
+    people.set(key, { id: user.id, fullName: user.fullName, username: null, email: null });
+  }
+  for (const user of roleUsers) {
+    const key = String(user.fullName || '').trim().toLowerCase();
+    if (!user?.id || !key || people.has(key)) continue;
+    people.set(key, {
+      id: user.id,
+      fullName: user.fullName,
+      username: user.username || null,
+      email: user.email || null,
+    });
+  }
+  return [...people.values()].sort((a, b) => a.fullName.localeCompare(b.fullName));
 }
 
 async function createUser(data, actor) {

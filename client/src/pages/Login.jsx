@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { homeFor, useAuth } from '../context/AuthContext';
 import ThemeToggle from '../components/ThemeToggle';
 import NavIcon from '../components/NavIcons';
+import BrandLogo from '../components/BrandLogo';
 
 export default function Login() {
   const { login } = useAuth();
@@ -32,7 +33,6 @@ export default function Login() {
   return (
     <div className="login-wrap">
       <section className="login-art">
-        <img className="login-photo" src="/brand/heavy-duty.webp" alt="" />
         <div className="login-overlay" />
         <div className="login-art-inner">
           <p className="login-kicker">Sahay Racks (P) Ltd</p>
@@ -45,7 +45,7 @@ export default function Login() {
         <ThemeToggle className="icon-btn theme-toggle login-theme" />
         <form className="login-box" onSubmit={onSubmit}>
           <div className="login-form-brand">
-            <img src="/brand/logo-color.jpg" alt="Sahay Racks (P) Ltd" />
+            <BrandLogo variant="color" />
           </div>
           <h3>Welcome back</h3>
           <p className="login-sub">Sign in to Sahay Racks Project Tracking</p>
@@ -85,7 +85,7 @@ export default function Login() {
             <p className="field-hint">Contact your Sahay Racks administrator to reset your password.</p>
           )}
           <button className="btn login-submit" type="submit" disabled={busy}>
-            {busy ? 'Signing in...' : 'SIGN IN'}
+            {busy ? 'Signing in…' : 'Sign in'}
           </button>
           <p className="login-powered">
             <span>Powered by</span>

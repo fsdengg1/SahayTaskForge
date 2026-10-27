@@ -47,4 +47,33 @@ export const api = {
   post: (path, body) => request(path, { method: 'POST', body: body instanceof FormData ? body : JSON.stringify(body || {}) }),
   put: (path, body) => request(path, { method: 'PUT', body: JSON.stringify(body || {}) }),
   patch: (path, body) => request(path, { method: 'PATCH', body: JSON.stringify(body || {}) }),
+  delete: (path) => request(path, { method: 'DELETE' }),
 };
+
+export function uploadFile(path, body, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API}${path}`);
+    const token = getToken();
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) onProgress(Math.round((event.loaded / event.total) * 100));
+    };
+    xhr.onload = () => {
+      let data = null;
+      try { data = xhr.responseText ? JSON.parse(xhr.responseText) : null; } catch { data = null; }
+      if (xhr.status === 401) {
+        clearToken();
+        window.location.href = '/login';
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(data?.error || 'Unable to upload the file.'));
+        return;
+      }
+      resolve(data);
+    };
+    xhr.onerror = () => reject(new Error('Unable to upload the file.'));
+    xhr.send(body);
+  });
+}
