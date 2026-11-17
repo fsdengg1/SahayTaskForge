@@ -1,0 +1,13 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg
+      - VITE_API_URL=${_VITE_API_URL}
+      - -t
+      - asia-south1-docker.pkg.dev/task-forge-sahay/cloud-run-source-deploy/task-forge-web:latest
+      - .
+substitutions:
+  _VITE_API_URL: https://task-forge-api-721665184062.asia-south1.run.app/api
+images:
+  - asia-south1-docker.pkg.dev/task-forge-sahay/cloud-run-source-deploy/task-forge-web:latest

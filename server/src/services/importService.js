@@ -131,4 +131,16 @@ function mapStatus(raw) {
   return 'NEW';
 }
 
-module.exports = { importWorkbook };
+async function buildTemplate() {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Leads');
+  sheet.addRow(['Company', 'Contact Person', 'Mobile', 'Email', 'Lead Date', 'Product', 'Status', 'Remarks']);
+  sheet.addRow(['Acme Industries', 'Ravi Kumar', '9876543210', 'ravi@acme.example', '2026-11-17', 'Selective pallet rack', 'NEW', 'Enquiry from site visit']);
+  sheet.getRow(1).font = { bold: true };
+  sheet.columns.forEach((column) => {
+    column.width = 22;
+  });
+  return workbook.xlsx.writeBuffer();
+}
+
+module.exports = { importWorkbook, buildTemplate };

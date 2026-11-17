@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api } from '../services/api';
+import { api, getToken } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useLookups } from '../hooks/useLookups';
 import { fmtDate, fmtDateTime, labelOf } from '../utils/format';
@@ -27,6 +27,25 @@ export default function IssueDetail() {
   }
 
   useEffect(load, [id]);
+
+  async function previewDocument(doc) {
+    setError('');
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || '/api'}/documents/${doc.id}/file`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) {
+        setError('Unable to open the document.');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {
+      setError('Unable to open the document.');
+    }
+  }
 
   async function saveStatus(e) {
     e.preventDefault();
@@ -189,7 +208,7 @@ export default function IssueDetail() {
                   <td>{labelOf(lookups, 'DOCUMENT_TYPE', doc.categoryCode)}</td>
                   <td>{doc.uploadedBy?.fullName || '—'}</td>
                   <td>{fmtDate(doc.uploadedAt)}</td>
-                  <td><a href={`/api/documents/${doc.id}/file`} target="_blank" rel="noreferrer">Preview</a></td>
+                  <td><button type="button" className="linkish" onClick={() => previewDocument(doc)}>Preview</button></td>
                 </tr>
               ))}
             </tbody>

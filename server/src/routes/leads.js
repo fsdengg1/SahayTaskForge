@@ -3,7 +3,9 @@ const { authenticate } = require('../middleware/auth');
 const { authorize } = require('../middleware/authorize');
 const { upload } = require('../middleware/upload');
 const { asyncHandler } = require('../utils/asyncHandler');
+const { AppError } = require('../utils/errors');
 const leadService = require('../services/leadService');
+const importService = require('../services/importService');
 const { createDocumentFromFile } = require('../services/documentService');
 
 const router = express.Router();
@@ -81,6 +83,29 @@ router.post(
     const files = [...(req.files?.photos || []), ...(req.files?.drawings || [])];
     const lead = await leadService.createLead(parseBody(req.body), { ...req.user, ip: req.ip }, files);
     res.status(201).json({ message: 'Lead created successfully.', lead });
+  })
+);
+
+router.get(
+  '/import-template',
+  authorize('leads.create'),
+  asyncHandler(async (req, res) => {
+    const buffer = await importService.buildTemplate();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="lead-import-template.xlsx"');
+    res.send(Buffer.from(buffer));
+  })
+);
+
+router.post(
+  '/import-excel',
+  authorize('leads.create'),
+  upload.single('file'),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw new AppError(400, 'Choose an Excel file to upload.');
+    const name = (req.file.originalname || '').toLowerCase();
+    if (!name.endsWith('.xlsx')) throw new AppError(400, 'Upload an .xlsx Excel file.');
+    res.json(await importService.importWorkbook(req.file.path, req.user));
   })
 );
 

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { api } from '../../services/api';
+import { api, getToken } from '../../services/api';
 import { useLookups } from '../../hooks/useLookups';
 import { fmtDate, fmtDateTime, toInputDate } from '../../utils/format';
 import Modal from '../../components/Modal';
@@ -90,6 +90,9 @@ export default function LeadForm() {
   const [customerError, setCustomerError] = useState('');
   const [preview, setPreview] = useState(null);
   const [productGroups, setProductGroups] = useState([]);
+  const [importing, setImporting] = useState(false);
+  const [importSummary, setImportSummary] = useState(null);
+  const excelInput = useRef(null);
 
   useEffect(() => {
     api.get('/customers?pageSize=100').then((d) => setCustomers(d.items || [])).catch(() => {});
@@ -212,6 +215,48 @@ export default function LeadForm() {
     }
   }
 
+  async function downloadTemplate() {
+    setNotice('');
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || '/api'}/leads/import-template`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) {
+        setErrors({ form: 'Unable to download the Excel template.' });
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'lead-import-template.xlsx';
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setErrors({ form: 'Unable to download the Excel template.' });
+    }
+  }
+
+  async function uploadExcel(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setImporting(true);
+    setImportSummary(null);
+    setNotice('');
+    setErrors({});
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      const summary = await api.post('/leads/import-excel', body);
+      setImportSummary(summary);
+    } catch (err) {
+      setErrors({ form: err.message || 'Unable to import the Excel file.' });
+    } finally {
+      setImporting(false);
+    }
+  }
+
   async function createCustomer(e) {
     e.preventDefault();
     e.stopPropagation();
@@ -259,6 +304,39 @@ export default function LeadForm() {
       </div>
       {notice && <div className="notice">{notice}</div>}
       {errors.form && <div className="notice err">{errors.form}</div>}
+
+      {!id && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="page-head" style={{ marginBottom: 0 }}>
+            <div>
+              <h3 style={{ margin: 0 }}>Upload Excel</h3>
+              <p>Create leads from a spreadsheet. Headers: Company, Contact Person, Mobile, Email, Lead Date, Product, Status, Remarks.</p>
+            </div>
+            <div className="btn-row">
+              <button className="btn ghost" type="button" onClick={downloadTemplate}>Download template</button>
+              <button className="btn copper" type="button" disabled={importing} onClick={() => excelInput.current?.click()}>
+                {importing ? 'Uploading…' : 'Upload Excel'}
+              </button>
+              <input
+                ref={excelInput}
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                hidden
+                onChange={uploadExcel}
+              />
+            </div>
+          </div>
+          {importSummary && (
+            <div className={`notice ${importSummary.errors?.length ? 'err' : ''}`} style={{ marginTop: 12, marginBottom: 0 }}>
+              Created {importSummary.created?.leads || 0} leads
+              {importSummary.skipped ? `, skipped ${importSummary.skipped} empty rows` : ''}
+              {importSummary.errors?.length ? `. ${importSummary.errors.length} rows could not be imported` : ''}.
+              {' '}
+              <button className="linkish" type="button" onClick={() => navigate('/leads')}>View leads</button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="section-title">Customer & contact details</div>
       <div className="card">

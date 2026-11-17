@@ -36,7 +36,10 @@ const upload = multer({
   storage,
   limits: { fileSize: (Number(process.env.MAX_FILE_SIZE_MB) || 25) * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (!allowed.has(file.mimetype)) {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const spreadsheet = ext === '.xlsx' || ext === '.xls';
+    const looseType = !file.mimetype || file.mimetype === 'application/octet-stream';
+    if (!allowed.has(file.mimetype) && !(spreadsheet && looseType)) {
       return cb(new AppError(400, 'This file type is not allowed.'));
     }
     cb(null, true);

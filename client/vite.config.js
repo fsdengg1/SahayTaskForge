@@ -14,8 +14,8 @@ export default defineConfig({
       '.ngrok.dev',
     ],
     proxy: {
-      '/api': 'http://localhost:4000',
-      '/uploads': 'http://localhost:4000',
+      '/api': 'http://127.0.0.1:4001',
+      '/uploads': 'http://127.0.0.1:4001',
     },
   },
 });

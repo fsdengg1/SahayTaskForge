@@ -11,6 +11,16 @@ function clearToken() {
 
 export { getToken, clearToken };
 
+function messageFrom(data, fallback) {
+  const error = data?.error;
+  if (typeof error === 'string' && error.trim() && error !== '[object Object]') return error;
+  if (error && typeof error === 'object' && typeof error.message === 'string' && error.message.trim()) {
+    return error.message;
+  }
+  if (typeof data?.message === 'string' && data.message.trim()) return data.message;
+  return fallback;
+}
+
 export async function request(path, options = {}) {
   const headers = { ...(options.headers || {}) };
   const token = getToken();
@@ -34,7 +44,7 @@ export async function request(path, options = {}) {
     data = { error: 'Unable to load data.' };
   }
   if (!res.ok) {
-    const err = new Error(data?.error || 'Unable to complete request.');
+    const err = new Error(messageFrom(data, 'Unable to complete request.'));
     err.details = data?.details;
     err.status = res.status;
     throw err;
@@ -68,7 +78,7 @@ export function uploadFile(path, body, onProgress) {
         return;
       }
       if (xhr.status < 200 || xhr.status >= 300) {
-        reject(new Error(data?.error || 'Unable to upload the file.'));
+        reject(new Error(messageFrom(data, 'Unable to upload the file.')));
         return;
       }
       resolve(data);
